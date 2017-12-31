@@ -13,26 +13,32 @@ import (
 // TODO config
 // TODO AS config generator
 
-func common() *config.Config {
-	configPathPtr := flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
+func common() (conf *config.Config, reg *appservice.Registration) {
+	pathPtr := flag.String("path", "my_registration_file.yaml", "The path to which to write the generated Registration YAML")
+	//configPathPtr := flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
 	flag.Parse()
 
-	config, err := config.LoadConfig(*configPathPtr)
-	if err != nil {
+	var err error
+
+	if reg, err = appservice.LoadRegistration(*pathPtr); err != nil {
 		panic(err)
 	}
 
-	return config
+	//if conf, err = config.LoadConfig(*configPathPtr); err != nil {
+	//	panic(err)
+	//}
+
+	return
 }
 
 func main() {
 	s := indexing.NewIndexer()
 
-	config := common()
+	_, reg := common()
 
 	srv := &http.Server{
-		Handler:      appservice.Handler(s, "token"),
-		Addr:         "127.0.0.1:8123",
+		Handler:      appservice.Handler(s, reg.HSToken),
+		Addr:         "127.0.0.1:9999",
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}

@@ -62,3 +62,13 @@ func NewRegistration(url, senderLocalpart string) *Registration {
 		ASToken:         generateToken(),
 	}
 }
+
+func LoadRegistration(path string) (registration *Registration, err error) {
+	var yamlFile []byte
+	if yamlFile, err = ioutil.ReadFile(path); err != nil {
+		return
+	}
+
+	err = yaml.Unmarshal(yamlFile, &registration)
+	return
+}
