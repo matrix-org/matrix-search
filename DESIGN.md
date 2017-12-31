@@ -9,6 +9,8 @@ The system receives events via the AS Transactions Push, indexes them and acts a
 In this mode it will not be possible to E2E-search, as that would mean sending keys to a potentially untrusted server.
 This mode is intended to alleviate load from Synapse and other homeservers in scenarios where the native Full Text search is too slow.
 
+In this mode, due to ACLs, it might be easier to move the resolving of the events back to Synapse, such that this only passes Synapse event IDs.
+
 ```
 +------------+          |  +-------------+   AS Push    +-------------------+
 |            | /search  |  |             | ===========> |                   |
@@ -21,6 +23,8 @@ This mode is intended to alleviate load from Synapse and other homeservers in sc
 
 # Local Daemon mode
 The system performs syncs via the CS API, indexes all new events and would let clients share E2E keys with it so that it can be used to index E2E rooms.
+
+In this mode, the indexes can never hold events which we don't have access to so we can store them locally in a lookup table.
 
 ```
 +------------+          |  +-------------+
