@@ -3,7 +3,8 @@ package appservice
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"regexp"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
 )
 
 type Namespace struct {
@@ -44,7 +45,12 @@ func generateToken() string {
 }
 
 func (r *Registration) Save(path string) error {
+	blob, err := yaml.Marshal(&r)
+	if err != nil {
+		return err
+	}
 
+	return ioutil.WriteFile(path, blob, 0644)
 }
 
 func NewRegistration(url, senderLocalpart string) *Registration {
