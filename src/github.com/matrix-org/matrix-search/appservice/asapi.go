@@ -1,4 +1,4 @@
-package asapi
+package appservice
 
 import (
 	"encoding/json"
