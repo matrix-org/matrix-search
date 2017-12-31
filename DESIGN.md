@@ -1,0 +1,44 @@
+# Design
+
+Due to the requirements this system will have two modes:
++ Appservice mode
++ Local Daemon mode
+
+# Appservice mode
+The system receives events via the AS Transactions Push, indexes them and acts as a Synapse/HS worker for /search.
+In this mode it will not be possible to E2E-search, as that would mean sending keys to a potentially untrusted server.
+This mode is intended to alleviate load from Synapse and other homeservers in scenarios where the native Full Text search is too slow.
+
+```
++------------+          |  +-------------+   AS Push    +-------------------+
+|            | /search  |  |             | ===========> |                   |
+|   Client   | ==========> |   Synapse   |              |   matrix-search   |
+|            |  CS-API  |  |             | <==========> |                   |
++------------+          |  +-------------+ /search jobs +-------------------+
+                        |
+                `Local` | `Remote` 
+```
+
+# Local Daemon mode
+The system performs syncs via the CS API, indexes all new events and would let clients share E2E keys with it so that it can be used to index E2E rooms.
+
+```
++------------+          |  +-------------+
+|            |          |  |             |
+|   Client   | ==========> |   Synapse   |
+|            |  CS-API  |  |             |
++------------+          |  +-------------+
+   /\                   |    ^
+   || /search           |    |
+   \/                   |    | /sync and
++-------------------+   |    | /messages
+|                   |   |    |  CS-API
+|   matrix-search   | =======/
+|                   |   |
++-------------------+   |
+                        |
+                `Local` | `Remote` 
+```
+
+This mode in the future may be extended to be accessible through non-local clients, by routing `/search` requests, `ClientA -> HS -> ClientB -> matrix-search` and thus not requiring N instances of matrix-search per-device.
+The Daemon could also be extended for further functionality, such as abstracting all E2E and providing an even simpler API for local clients to use, or buffering /sync requests such that it can serve room history from a local store, speeding up the frontend client performance.
