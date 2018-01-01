@@ -13,6 +13,8 @@ type Config struct {
 
 	Search struct {
 		ModeAppservice bool `yaml:"mode_appservice"`
+		Stemming       struct {
+		} `yaml:"stemming"`
 	} `yaml:"search"`
 
 	Logging struct {

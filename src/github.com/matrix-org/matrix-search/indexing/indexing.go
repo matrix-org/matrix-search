@@ -82,7 +82,7 @@ func Bleve(indexPath string) (bleve.Index, error) {
 type Event struct {
 	//ID      string
 	Sender  string
-	Content string
+	Content map[string]interface{}
 	//RoomID  string
 	Time time.Time
 }

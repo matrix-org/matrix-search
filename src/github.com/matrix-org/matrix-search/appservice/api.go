@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func authenticate(h http.Handler, hsToken string) http.Handler {
+func authenticate(h http.HandlerFunc, hsToken string) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token := r.URL.Query().Get("access_token"); token == hsToken {
 			h.ServeHTTP(w, r)
@@ -40,8 +40,14 @@ type transaction struct {
 }
 
 // TODO persist txnIds 4 dedup
+type processedTransaction struct {
+	ID  string
+	Num int
+}
 
 func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer indexing.Indexer) {
+	// CHECK IF txnId is already in GORM, skip if it is
+
 	var txn transaction
 	if r.Body == nil {
 		http.Error(w, "Please send a request body", http.StatusBadRequest)
@@ -57,43 +63,27 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 
 	for i := range txn.Events {
 		event := indexing.Event{
-			Sender: txn.Events[i].Sender,
-			Time:   time.Unix(0, txn.Events[i].Timestamp*1000),
+			Sender:  txn.Events[i].Sender,
+			Time:    time.Unix(0, txn.Events[i].Timestamp*1000),
+			Content: txn.Events[i].Content,
 		}
-		event.Content = txn.Events[i].Content["body"].(string)
+		//event.Content = txn.Events[i].Content["body"].(string)
 		indexer.AddEvent(txn.Events[i].ID, txn.Events[i].RoomID, event)
 	}
+
+	//proc := processedTransaction{txnId, len(txn.Events)}
+	// persist in GORM
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("{}"))
 }
 
-func Handler(indexer indexing.Indexer, hsToken string) http.Handler {
-	r := mux.NewRouter()
-
-	r.HandleFunc("/transactions/{txnId}", func(w http.ResponseWriter, r *http.Request) {
+func RegisterHandler(r *mux.Router, idxr indexing.Indexer, hsToken string) {
+	r.HandleFunc("/asapi/transactions/{txnId}", func(w http.ResponseWriter, r *http.Request) {
 		txnId := mux.Vars(r)["txnId"]
-		txnHandler(w, r, txnId, indexer)
+		txnHandler(w, r, txnId, idxr)
 	}).Methods("PUT")
 
-	r.HandleFunc("/test/{roomId}/{query}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		roomId := vars["roomId"]
-		query := vars["query"]
-		res, _ := indexer.Query(roomId, query)
-
-		hits, err := json.Marshal(res.Hits)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(hits)
-	}).Methods("GET")
-
-	r.HandleFunc("/rooms/{roomAlias}", doesNotExist).Methods("GET")
-	r.HandleFunc("/users/{userId}", doesNotExist).Methods("GET")
-
-	return authenticate(r, hsToken)
+	r.HandleFunc("/asapi/rooms/{roomAlias}", authenticate(doesNotExist, hsToken)).Methods("GET")
+	r.HandleFunc("/asapi/users/{userId}", authenticate(doesNotExist, hsToken)).Methods("GET")
 }
