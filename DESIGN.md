@@ -44,5 +44,4 @@ In this mode, the indexes can never hold events which we don't have access to so
                 `Local` | `Remote` 
 ```
 
-This mode in the future may be extended to be accessible through non-local clients, by routing `/search` requests, `ClientA -> HS -> ClientB -> matrix-search` and thus not requiring N instances of matrix-search per-device.
 The Daemon could also be extended for further functionality, such as abstracting all E2E and providing an even simpler API for local clients to use, or buffering /sync requests such that it can serve room history from a local store, speeding up the frontend client performance.
