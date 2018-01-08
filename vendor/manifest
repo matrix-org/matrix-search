@@ -8,6 +8,19 @@
 			"branch": "master"
 		},
 		{
+			"importpath": "github.com/blevesearch/blevex/detectlang",
+			"repository": "https://github.com/blevesearch/blevex",
+			"revision": "3d6fce2ff9175b7bffc2b3c98ff553a3701868a2",
+			"branch": "master",
+			"path": "/detectlang"
+		},
+		{
+			"importpath": "github.com/blevesearch/cld2",
+			"repository": "https://github.com/blevesearch/cld2",
+			"revision": "10f17c049ec9b2c706118870a0f580a370217a65",
+			"branch": "master"
+		},
+		{
 			"importpath": "github.com/blevesearch/go-porterstemmer",
 			"repository": "https://github.com/blevesearch/go-porterstemmer",
 			"revision": "23a2c8e5cf1f380f27722c6d2ae8896431dc7d0e",
@@ -35,6 +48,12 @@
 			"importpath": "github.com/couchbase/moss",
 			"repository": "https://github.com/couchbase/moss",
 			"revision": "010c98934dc0b4e69f2d27c5abdfd36bbf6de3ee",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/cznic/b",
+			"repository": "https://github.com/cznic/b",
+			"revision": "c0c71e655879a2848b5a0e0208b63f97325cbacd",
 			"branch": "master"
 		},
 		{

@@ -4,11 +4,14 @@ import (
 	"encoding/base64"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
+	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
+	"github.com/blevesearch/bleve/analysis/lang/en"
 	"github.com/blevesearch/bleve/analysis/token/lowercase"
 	"github.com/blevesearch/bleve/analysis/token/ngram"
 	"github.com/blevesearch/bleve/analysis/tokenizer/single"
 	"github.com/blevesearch/bleve/analysis/tokenizer/unicode"
 	"github.com/blevesearch/bleve/mapping"
+	"github.com/blevesearch/blevex/detectlang"
 	"log"
 	"os"
 	"sync"
@@ -53,6 +56,8 @@ func NewIndexer() Indexer {
 	}
 }
 
+const bleveBasePath = "bleve/"
+
 //var bleveIdx bleve.Index
 //var bleveIdxMap = make(map[string]bleve.Index)
 
@@ -64,13 +69,17 @@ func Bleve(indexPath string) (bleve.Index, error) {
 	//}
 
 	// try to open de persistence file...
-	bleveIdx, err := bleve.Open("bleve/" + indexPath)
+	bleveIdx, err := bleve.Open(bleveBasePath + indexPath)
 
 	// if doesn't exists or something goes wrong...
 	if err != nil {
 		// create a new mapping file and create a new index
-		newMapping := bleve.NewIndexMapping()
-		bleveIdx, err = bleve.New("bleve/"+indexPath, newMapping)
+		//newMapping := bleve.NewIndexMapping()
+		newMapping, err := createEventMapping()
+		if err != nil {
+			return nil, err
+		}
+		bleveIdx, err = bleve.New(bleveBasePath+indexPath, newMapping)
 	}
 
 	//if err == nil {
@@ -108,42 +117,62 @@ func OpenIndex(databasePath string) bleve.Index {
 	return index
 }
 
-func CreateIndex(databasePath string) bleve.Index {
-	mapping := bleve.NewIndexMapping()
-	mapping = addCustomAnalyzers(mapping)
-	mapping = createEventMapping(mapping)
+//func CreateIndex(databasePath string) bleve.Index {
+//	mapping := bleve.NewIndexMapping()
+//	mapping = addCustomAnalyzers(mapping)
+//	mapping, _ = createEventMapping()
+//
+//	index, err := bleve.New(databasePath, mapping)
+//	if err != nil {
+//		log.Fatal(err)
+//		os.Exit(-1)
+//	}
+//
+//	return index
+//}
 
-	index, err := bleve.New(databasePath, mapping)
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(-1)
-	}
+const textFieldAnalyzer = "en"
 
-	return index
-}
+func createEventMapping() (mapping.IndexMapping, error) {
 
-func createEventMapping(indexMapping *mapping.IndexMappingImpl) *mapping.IndexMappingImpl {
+	// a generic reusable mapping for english text
+	englishTextFieldMapping := bleve.NewTextFieldMapping()
+	englishTextFieldMapping.Analyzer = en.AnalyzerName
+
+	// a generic reusable mapping for keyword text
+	keywordFieldMapping := bleve.NewTextFieldMapping()
+	keywordFieldMapping.Analyzer = keyword.Name
+
+	// a specific mapping to index the description fields
+	// detected language
+	descriptionLangFieldMapping := bleve.NewTextFieldMapping()
+	descriptionLangFieldMapping.Name = "descriptionLang"
+	descriptionLangFieldMapping.Analyzer = detectlang.AnalyzerName
+	descriptionLangFieldMapping.Store = false
+	descriptionLangFieldMapping.IncludeTermVectors = false
+	descriptionLangFieldMapping.IncludeInAll = false
+
 	eventMapping := bleve.NewDocumentMapping()
 
-	eventIDMapping := bleve.NewTextFieldMapping()
-	eventIDMapping.IncludeInAll = false
-	eventMapping.AddFieldMappingsAt("event_id", eventIDMapping)
+	//senderMapping := bleve.NewTextFieldMapping()
+	//senderMapping.IncludeInAll = false
+	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
 
-	senderMapping := bleve.NewTextFieldMapping()
-	senderMapping.IncludeInAll = false
-	eventMapping.AddFieldMappingsAt("sender", senderMapping)
+	//roomIDMapping := bleve.NewTextFieldMapping()
+	//roomIDMapping.IncludeInAll = false
+	//eventMapping.AddFieldMappingsAt("room_id", roomIDMapping)
 
-	roomIDMapping := bleve.NewTextFieldMapping()
-	roomIDMapping.IncludeInAll = false
-	eventMapping.AddFieldMappingsAt("room_id", roomIDMapping)
+	//contentMapping := bleve.NewTextFieldMapping()
+	//contentMapping.IncludeInAll = false
+	eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
 
-	contentMapping := bleve.NewTextFieldMapping()
-	contentMapping.IncludeInAll = false
-	eventMapping.AddFieldMappingsAt("content", contentMapping)
-
+	indexMapping := bleve.NewIndexMapping()
 	indexMapping.AddDocumentMapping("event", eventMapping)
 
-	return indexMapping
+	indexMapping.TypeField = "type"
+	indexMapping.DefaultAnalyzer = textFieldAnalyzer
+
+	return indexMapping, nil
 }
 
 func addCustomTokenFilter(indexMapping *mapping.IndexMappingImpl) *mapping.IndexMappingImpl {
