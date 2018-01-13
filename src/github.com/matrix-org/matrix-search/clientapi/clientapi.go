@@ -2,19 +2,34 @@ package clientapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
 )
 
-func RegisterHandler(r *mux.Router, idxr indexing.Indexer) {
-	r.HandleFunc("/clientapi/search/{roomId}/{query}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		roomId := vars["roomId"]
-		query := vars["query"]
-		res, err := idxr.Query(roomId, query)
+type searchRequest struct {
+	RoomIDs []string `json:"room_ids"`
+	Query   string   `json:"query"`
+}
+
+func RegisterHandler(router *mux.Router, idxr indexing.Indexer) {
+	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
+		var sr searchRequest
+		if r.Body == nil {
+			http.Error(w, "Please send a request body", 400)
+			return
+		}
+		err := json.NewDecoder(r.Body).Decode(&sr)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		res, err := idxr.QueryMultiple(sr.RoomIDs, sr.Query)
 
 		if err != nil {
+			fmt.Println(err)
 			// TODO handle err
 		}
 

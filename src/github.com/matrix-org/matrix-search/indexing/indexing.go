@@ -2,6 +2,7 @@ package indexing
 
 import (
 	"encoding/base64"
+	"fmt"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
 	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
@@ -41,14 +42,27 @@ func (i *Indexer) getIndex(id string) (idx bleve.Index) {
 }
 
 func (i *Indexer) AddEvent(ID, RoomID string, ev Event) {
-	ev.Index(ID, i.getIndex(RoomID))
+	ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.getIndex(RoomID))
+}
+
+func makeSearchRequest(query string) *bleve.SearchRequest {
+	return bleve.NewSearchRequest(bleve.NewQueryStringQuery(strings.ToLower(query)))
 }
 
 func (i *Indexer) Query(id, query string) (*bleve.SearchResult, error) {
 	//searchRequest := bleve.NewSearchRequest(bleve.NewMatchQuery(query))
 	//searchRequest := bleve.NewSearchRequest(bleve.NewFuzzyQuery(query))
-	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(strings.ToLower(query)))
-	return i.getIndex(id).Search(searchRequest)
+	return i.getIndex(id).Search(makeSearchRequest(query))
+}
+
+func (i *Indexer) QueryMultiple(roomIds []string, query string) (*bleve.SearchResult, error) {
+	targetedIdxs := make([]bleve.Index, len(roomIds))
+	for j, roomId := range roomIds {
+		targetedIdxs[j] = i.getIndex(roomId)
+	}
+
+	collection := bleve.NewIndexAlias(targetedIdxs...)
+	return collection.Search(makeSearchRequest(query))
 }
 
 func NewIndexer() Indexer {
