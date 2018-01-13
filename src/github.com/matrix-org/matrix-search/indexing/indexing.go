@@ -14,6 +14,7 @@ import (
 	"github.com/blevesearch/blevex/detectlang"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -46,7 +47,7 @@ func (i *Indexer) AddEvent(ID, RoomID string, ev Event) {
 func (i *Indexer) Query(id, query string) (*bleve.SearchResult, error) {
 	//searchRequest := bleve.NewSearchRequest(bleve.NewMatchQuery(query))
 	//searchRequest := bleve.NewSearchRequest(bleve.NewFuzzyQuery(query))
-	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(query))
+	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(strings.ToLower(query)))
 	return i.getIndex(id).Search(searchRequest)
 }
 
@@ -88,13 +89,15 @@ func Bleve(indexPath string) (bleve.Index, error) {
 	return bleveIdx, err
 }
 
-type Event struct {
+/*type Event struct {
 	//ID      string
 	sender  string
 	content map[string]interface{}
 	//RoomID  string
 	time time.Time
-}
+}*/
+
+type Event map[string]interface{}
 
 func (ev *Event) Type() string {
 	return "event"
@@ -107,7 +110,12 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 }
 
 func NewEvent(sender string, content map[string]interface{}, time time.Time) Event {
-	return &Event{sender, content, time}
+	//return interface{}(Event{sender, content, time})
+	return Event{
+		"sender":  sender,
+		"content": content,
+		"time":    time,
+	}
 }
 
 func OpenIndex(databasePath string) bleve.Index {
@@ -170,6 +178,8 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	//contentMapping.IncludeInAll = false
 	//eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
 	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping)
+
+	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
 
 	indexMapping := bleve.NewIndexMapping()
 	indexMapping.AddDocumentMapping("event", eventMapping)

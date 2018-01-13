@@ -12,7 +12,11 @@ func RegisterHandler(r *mux.Router, idxr indexing.Indexer) {
 		vars := mux.Vars(r)
 		roomId := vars["roomId"]
 		query := vars["query"]
-		res, _ := idxr.Query(roomId, query)
+		res, err := idxr.Query(roomId, query)
+
+		if err != nil {
+			// TODO handle err
+		}
 
 		hits, err := json.Marshal(res.Hits)
 		if err != nil {
