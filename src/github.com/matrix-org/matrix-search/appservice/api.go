@@ -61,14 +61,10 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 		return
 	}
 
-	for i := range txn.Events {
-		event := indexing.Event{
-			Sender:  txn.Events[i].Sender,
-			Time:    time.Unix(0, txn.Events[i].Timestamp*1000),
-			Content: txn.Events[i].Content,
-		}
-		//event.Content = txn.Events[i].Content["body"].(string)
-		indexer.AddEvent(txn.Events[i].ID, txn.Events[i].RoomID, event)
+	for _, ev := range txn.Events {
+		ts := time.Unix(0, ev.Timestamp*1000)
+		iev := indexing.NewEvent(ev.Sender, ev.Content, ts)
+		indexer.AddEvent(ev.ID, ev.RoomID, iev)
 	}
 
 	//proc := processedTransaction{txnId, len(txn.Events)}

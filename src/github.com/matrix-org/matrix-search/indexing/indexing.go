@@ -90,10 +90,10 @@ func Bleve(indexPath string) (bleve.Index, error) {
 
 type Event struct {
 	//ID      string
-	Sender  string
-	Content map[string]interface{}
+	sender  string
+	content map[string]interface{}
 	//RoomID  string
-	Time time.Time
+	time time.Time
 }
 
 func (ev *Event) Type() string {
@@ -104,6 +104,10 @@ func (ev *Event) Type() string {
 func (ev *Event) Index(ID string, index bleve.Index) error {
 	err := index.Index(ID, ev)
 	return err
+}
+
+func NewEvent(sender string, content map[string]interface{}, time time.Time) Event {
+	return &Event{sender, content, time}
 }
 
 func OpenIndex(databasePath string) bleve.Index {
@@ -164,7 +168,8 @@ func createEventMapping() (mapping.IndexMapping, error) {
 
 	//contentMapping := bleve.NewTextFieldMapping()
 	//contentMapping.IncludeInAll = false
-	eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
+	//eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
+	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping)
 
 	indexMapping := bleve.NewIndexMapping()
 	indexMapping.AddDocumentMapping("event", eventMapping)
