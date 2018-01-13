@@ -15,6 +15,8 @@ const (
 	dbFile    = "test.sqlite3.db"
 )
 
+// TODO fix this test
+
 var eventList = []Event{
 	{"$1", "@mxidOne:server", "The European Go conference", "!room", time.Date(2015, 11, 19, 9, 0, 0, 0, time.UTC)},
 
