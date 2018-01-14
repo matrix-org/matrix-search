@@ -2,6 +2,7 @@ package appservice
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
@@ -60,6 +61,8 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 		w.Write([]byte("{}"))
 		return
 	}
+
+	fmt.Printf("Processing %d events.\n", len(txn.Events))
 
 	for _, ev := range txn.Events {
 		if ev.Type != "m.room.message" {
