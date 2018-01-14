@@ -2,13 +2,19 @@ package indexing
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
 	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
+	"github.com/blevesearch/bleve/analysis/analyzer/web"
 	"github.com/blevesearch/bleve/analysis/lang/en"
+	"github.com/blevesearch/bleve/analysis/token/apostrophe"
+	"github.com/blevesearch/bleve/analysis/token/camelcase"
+	"github.com/blevesearch/bleve/analysis/token/elision"
 	"github.com/blevesearch/bleve/analysis/token/lowercase"
 	"github.com/blevesearch/bleve/analysis/token/ngram"
+	"github.com/blevesearch/bleve/analysis/token/porter"
 	"github.com/blevesearch/bleve/analysis/tokenizer/single"
 	"github.com/blevesearch/bleve/analysis/tokenizer/unicode"
 	"github.com/blevesearch/bleve/mapping"
@@ -18,11 +24,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"errors"
-	"github.com/blevesearch/bleve/analysis/token/apostrophe"
-	"github.com/blevesearch/bleve/analysis/token/camelcase"
-	"github.com/blevesearch/bleve/analysis/token/elision"
-	"github.com/blevesearch/bleve/analysis/token/porter"
 )
 
 type Indexer struct {
@@ -195,6 +196,9 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	descriptionLangFieldMappingAlt := bleve.NewTextFieldMapping()
 	descriptionLangFieldMappingAlt.Analyzer = "fuzzy"
 
+	descriptionLangFieldMappingWeb := bleve.NewTextFieldMapping()
+	descriptionLangFieldMappingWeb.Analyzer = web.Name
+
 	eventMapping := bleve.NewDocumentMapping()
 
 	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
@@ -207,7 +211,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	//contentMapping := bleve.NewTextFieldMapping()
 	//contentMapping.IncludeInAll = false
 	//eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
-	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping, descriptionLangFieldMappingAlt)
+	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping, descriptionLangFieldMappingAlt, descriptionLangFieldMappingWeb)
 
 	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
 
@@ -215,7 +219,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	indexMapping.AddDocumentMapping("event", eventMapping)
 
 	indexMapping.AddCustomAnalyzer("fuzzy", map[string]interface{}{
-		"type": custom.Name,
+		"type":      custom.Name,
 		"tokenizer": unicode.Name,
 		"token_filters": []string{
 			detectlang.FilterName,
