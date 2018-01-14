@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"errors"
 )
 
 type Indexer struct {
@@ -123,6 +124,9 @@ func (ev *Event) Type() string {
 
 // Index is used to add the event in the bleve index.
 func (ev *Event) Index(ID string, index bleve.Index) error {
+	if index == nil {
+		return errors.New("missing index")
+	}
 	err := index.Index(ID, ev)
 	return err
 }
