@@ -11,7 +11,6 @@ import (
 	"github.com/blevesearch/bleve/analysis/lang/en"
 	"github.com/blevesearch/bleve/analysis/token/apostrophe"
 	"github.com/blevesearch/bleve/analysis/token/camelcase"
-	"github.com/blevesearch/bleve/analysis/token/elision"
 	"github.com/blevesearch/bleve/analysis/token/lowercase"
 	"github.com/blevesearch/bleve/analysis/token/ngram"
 	"github.com/blevesearch/bleve/analysis/token/porter"
@@ -41,9 +40,17 @@ func (i *Indexer) getIndex(id string) (idx bleve.Index) {
 	}
 
 	i.Lock()
-	idx, _ = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
+	defer i.Unlock()
+
+	var err error
+	idx, err = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	i.idxs[id] = idx
-	i.Unlock()
 	return
 }
 
@@ -81,7 +88,7 @@ func NewIndexer() Indexer {
 	}
 }
 
-const bleveBasePath = "bleve/"
+const bleveBasePath = "bleve"
 
 //var bleveIdx bleve.Index
 //var bleveIdxMap = make(map[string]bleve.Index)
@@ -93,18 +100,21 @@ func Bleve(indexPath string) (bleve.Index, error) {
 	//	return bleveIdx, nil
 	//}
 
+	path := bleveBasePath + string(os.PathSeparator) + indexPath
+
 	// try to open de persistence file...
-	bleveIdx, err := bleve.Open(bleveBasePath + indexPath)
+	bleveIdx, err := bleve.Open(path)
 
 	// if doesn't exists or something goes wrong...
 	if err != nil {
 		// create a new mapping file and create a new index
 		//newMapping := bleve.NewIndexMapping()
-		newMapping, err := createEventMapping()
+		var newMapping mapping.IndexMapping
+		newMapping, err = createEventMapping()
 		if err != nil {
 			return nil, err
 		}
-		bleveIdx, err = bleve.New(bleveBasePath+indexPath, newMapping)
+		bleveIdx, err = bleve.New(path, newMapping)
 	}
 
 	//if err == nil {
@@ -173,7 +183,33 @@ func OpenIndex(databasePath string) bleve.Index {
 
 const textFieldAnalyzer = "en"
 
+func createIndexMapping() *mapping.IndexMappingImpl {
+	indexMapping := bleve.NewIndexMapping()
+
+	err := indexMapping.AddCustomAnalyzer("custom_alt", map[string]interface{}{
+		"type":      custom.Name,
+		"tokenizer": unicode.Name,
+		"token_filters": []string{
+			detectlang.FilterName,
+			en.PossessiveName,
+			apostrophe.Name,
+			lowercase.Name,
+			camelcase.Name,
+			//elision.Name,
+			en.StopName,
+			porter.Name,
+		},
+	})
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	return indexMapping
+}
+
 func createEventMapping() (mapping.IndexMapping, error) {
+	indexMapping := createIndexMapping()
 
 	// a generic reusable mapping for english text
 	englishTextFieldMapping := bleve.NewTextFieldMapping()
@@ -194,7 +230,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	//descriptionLangFieldMapping.IncludeInAll = false
 
 	descriptionLangFieldMappingAlt := bleve.NewTextFieldMapping()
-	descriptionLangFieldMappingAlt.Analyzer = "fuzzy"
+	descriptionLangFieldMappingAlt.Analyzer = "custom_alt"
 
 	descriptionLangFieldMappingWeb := bleve.NewTextFieldMapping()
 	descriptionLangFieldMappingWeb.Analyzer = web.Name
@@ -215,23 +251,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 
 	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
 
-	indexMapping := bleve.NewIndexMapping()
 	indexMapping.AddDocumentMapping("event", eventMapping)
-
-	indexMapping.AddCustomAnalyzer("fuzzy", map[string]interface{}{
-		"type":      custom.Name,
-		"tokenizer": unicode.Name,
-		"token_filters": []string{
-			detectlang.FilterName,
-			en.PossessiveName,
-			apostrophe.Name,
-			lowercase.Name,
-			camelcase.Name,
-			elision.Name,
-			en.StopName,
-			porter.Name,
-		},
-	})
 
 	indexMapping.TypeField = "type"
 	indexMapping.DefaultAnalyzer = textFieldAnalyzer
