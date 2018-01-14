@@ -41,8 +41,12 @@ func (i *Indexer) getIndex(id string) (idx bleve.Index) {
 	return
 }
 
-func (i *Indexer) AddEvent(ID, RoomID string, ev Event) {
-	ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.getIndex(RoomID))
+func (i *Indexer) AddEvent(ID, RoomID string, ev Event) bool {
+	if err := ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.getIndex(RoomID)); err != nil {
+		fmt.Println(err)
+		return false
+	}
+	return true
 }
 
 func makeSearchRequest(query string) *bleve.SearchRequest {
