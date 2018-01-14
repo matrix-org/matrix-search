@@ -123,11 +123,12 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 	return err
 }
 
-func NewEvent(sender string, content map[string]interface{}, time time.Time) Event {
+func NewEvent(sender, evType string, content map[string]interface{}, time time.Time) Event {
 	//return interface{}(Event{sender, content, time})
 	return Event{
 		"sender":  sender,
 		"content": content,
+		"type":    evType,
 		"time":    time,
 	}
 }
@@ -168,6 +169,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	// a generic reusable mapping for keyword text
 	keywordFieldMapping := bleve.NewTextFieldMapping()
 	keywordFieldMapping.Analyzer = keyword.Name
+	keywordFieldMapping.IncludeInAll = false
 
 	// a specific mapping to index the description fields
 	// detected language
@@ -180,9 +182,8 @@ func createEventMapping() (mapping.IndexMapping, error) {
 
 	eventMapping := bleve.NewDocumentMapping()
 
-	//senderMapping := bleve.NewTextFieldMapping()
-	//senderMapping.IncludeInAll = false
 	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
+	eventMapping.AddFieldMappingsAt("type", keywordFieldMapping)
 
 	//roomIDMapping := bleve.NewTextFieldMapping()
 	//roomIDMapping.IncludeInAll = false
