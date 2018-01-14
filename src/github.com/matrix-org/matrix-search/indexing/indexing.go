@@ -19,6 +19,10 @@ import (
 	"sync"
 	"time"
 	"errors"
+	"github.com/blevesearch/bleve/analysis/token/apostrophe"
+	"github.com/blevesearch/bleve/analysis/token/camelcase"
+	"github.com/blevesearch/bleve/analysis/token/elision"
+	"github.com/blevesearch/bleve/analysis/token/porter"
 )
 
 type Indexer struct {
@@ -186,7 +190,10 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	descriptionLangFieldMapping.Analyzer = detectlang.AnalyzerName
 	descriptionLangFieldMapping.Store = false
 	descriptionLangFieldMapping.IncludeTermVectors = false
-	descriptionLangFieldMapping.IncludeInAll = false
+	//descriptionLangFieldMapping.IncludeInAll = false
+
+	descriptionLangFieldMappingAlt := bleve.NewTextFieldMapping()
+	descriptionLangFieldMappingAlt.Analyzer = "fuzzy"
 
 	eventMapping := bleve.NewDocumentMapping()
 
@@ -200,12 +207,27 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	//contentMapping := bleve.NewTextFieldMapping()
 	//contentMapping.IncludeInAll = false
 	//eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
-	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping)
+	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping, descriptionLangFieldMappingAlt)
 
 	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
 
 	indexMapping := bleve.NewIndexMapping()
 	indexMapping.AddDocumentMapping("event", eventMapping)
+
+	indexMapping.AddCustomAnalyzer("fuzzy", map[string]interface{}{
+		"type": custom.Name,
+		"tokenizer": unicode.Name,
+		"token_filters": []string{
+			detectlang.FilterName,
+			en.PossessiveName,
+			apostrophe.Name,
+			lowercase.Name,
+			camelcase.Name,
+			elision.Name,
+			en.StopName,
+			porter.Name,
+		},
+	})
 
 	indexMapping.TypeField = "type"
 	indexMapping.DefaultAnalyzer = textFieldAnalyzer
