@@ -64,7 +64,8 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 	for _, ev := range txn.Events {
 		ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
 		iev := indexing.NewEvent(ev.Sender, ev.Type, ev.Content, ts)
-		_ := indexer.AddEvent(ev.ID, ev.RoomID, iev)
+		// TODO handle err from AddEvent and bail txn processing
+		indexer.AddEvent(ev.ID, ev.RoomID, iev)
 	}
 
 	//proc := processedTransaction{txnId, len(txn.Events)}
