@@ -30,6 +30,8 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer) {
 
 		if err != nil {
 			fmt.Println(err)
+			http.Error(w, err.Error(), 400)
+			return
 			// TODO handle err
 		}
 
