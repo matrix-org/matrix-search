@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"time"
+	"fmt"
+	"os"
 )
 
 var pathPtr = flag.String("path", "my_registration_file.yaml", "The path to which to write the generated Registration YAML")
@@ -24,11 +26,13 @@ func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
 	var err error
 
 	if reg, err = appservice.LoadRegistration(*pathPtr); err != nil {
-		panic(err)
+		fmt.Printf("Unable to load registration file: %v\n", err)
+		os.Exit(-1)
 	}
 
 	//if conf, err = config.LoadConfig(*configPathPtr); err != nil {
-	//	panic(err)
+	//	fmt.Printf("Unable to load config file: %v\n", err)
+	//	os.Exit(-1)
 	//}
 
 	return
