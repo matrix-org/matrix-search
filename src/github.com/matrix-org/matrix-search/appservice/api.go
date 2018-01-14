@@ -62,6 +62,10 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 	}
 
 	for _, ev := range txn.Events {
+		if ev.Type != "m.room.message" {
+			continue
+		}
+
 		ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
 		iev := indexing.NewEvent(ev.Sender, ev.Type, ev.Content, ts)
 		// TODO handle err from AddEvent and bail txn processing
