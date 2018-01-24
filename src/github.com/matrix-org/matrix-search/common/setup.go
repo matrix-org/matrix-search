@@ -2,7 +2,9 @@ package common
 
 import (
 	"flag"
+	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/appservice"
 	"github.com/matrix-org/matrix-search/clientapi"
 	"github.com/matrix-org/matrix-search/config"
@@ -10,14 +12,13 @@ import (
 	"log"
 	"net/http"
 	"net/http/pprof"
-	"time"
-	"fmt"
 	"os"
+	"time"
 )
 
 var pathPtr = flag.String("path", "my_registration_file.yaml", "The path to which to write the generated Registration YAML")
 
-//var configPathPtr = flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
+var configPathPtr = flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
 var PprofEnabledPtr = flag.Bool("pprof", false, "Whether or not to enable Pprof debugging")
 
 func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
@@ -30,15 +31,15 @@ func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
 		os.Exit(-1)
 	}
 
-	//if conf, err = config.LoadConfig(*configPathPtr); err != nil {
-	//	fmt.Printf("Unable to load config file: %v\n", err)
-	//	os.Exit(-1)
-	//}
+	if conf, err = config.LoadConfig(*configPathPtr); err != nil {
+		fmt.Printf("Unable to load config file: %v\n", err)
+		os.Exit(-1)
+	}
 
 	return
 }
 
-func Setup() (idxr indexing.Indexer, r *mux.Router) {
+func Setup(cli *gomatrix.Client) (idxr indexing.Indexer, r *mux.Router) {
 	idxr = indexing.NewIndexer()
 
 	r = mux.NewRouter()
@@ -49,7 +50,7 @@ func Setup() (idxr indexing.Indexer, r *mux.Router) {
 		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	}
 
-	clientapi.RegisterHandler(r, idxr)
+	clientapi.RegisterHandler(r, idxr, cli)
 
 	return
 }
