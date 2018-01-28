@@ -10,11 +10,6 @@ import (
 	"strings"
 )
 
-type searchRequest struct {
-	RoomIDs []string `json:"room_ids"`
-	Query   string   `json:"query"`
-}
-
 type GroupValue struct {
 	NextBatch *string  `json:"next_batch"`
 	Order     int      `json:"order"`
@@ -71,10 +66,10 @@ type RequestEventContext struct {
 }
 
 type RequestRoomEvents struct {
-	SearchTerm string   `json:"search_term"`
-	Keys       []string `json:"keys"`
-	//Filter
-	OrderBy string `json:"order_by"` // recent/rank
+	SearchTerm string              `json:"search_term"`
+	Keys       []string            `json:"keys"`
+	Filter     gomatrix.FilterPart `json:"filter"`
+	OrderBy    string              `json:"order_by"` // recent/rank
 	//EventContext
 	IncludeState bool               `json:"include_state"`
 	Groupings    []RequestGroupings `json:"groupings"`
@@ -92,7 +87,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 	contextResolver := NewResolver(cli)
 
 	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
-		var sr searchRequest
+		var sr SearchRequest
 		if r.Body == nil {
 			http.Error(w, "Please send a request body", 400)
 			return
@@ -103,7 +98,17 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			return
 		}
 
-		res, err := idxr.QueryMultiple(sr.RoomIDs, sr.Query)
+		q := sr.SearchCategories.RoomEvents
+		roomIDs := q.Filter.Rooms
+		if len(roomIDs) == 0 {
+			resp, err := contextResolver.JoinedRooms()
+			if err != nil {
+				panic(err)
+			}
+			roomIDs = resp.JoinedRooms
+		}
+
+		res, err := idxr.QueryMultiple(roomIDs, q.SearchTerm)
 
 		if err != nil {
 			fmt.Println(err)

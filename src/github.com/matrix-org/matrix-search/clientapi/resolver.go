@@ -24,6 +24,23 @@ type RespContext struct {
 	State        []*gomatrix.Event `json:"state"`
 }
 
+type RespJoinedRooms struct {
+	JoinedRooms []string `json:"joined_rooms"`
+}
+
+func (r *Resolver) JoinedRooms() (resp *RespJoinedRooms, err error) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.AppServiceUserID = "@testguy:synapse"
+
+	urlPath := r.BuildURL("joined_rooms")
+	_, err = r.MakeRequest("GET", urlPath, nil, &resp)
+
+	r.AppServiceUserID = ""
+	return
+}
+
 func (r *Resolver) resolveEvent(roomID, eventID string, limit int) (resp *RespContext, err error) {
 	r.Lock()
 	defer r.Unlock()
