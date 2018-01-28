@@ -41,7 +41,7 @@ type Result struct {
 type RoomEventResults struct {
 	Count     int                              `json:"count"`
 	Results   []Result                         `json:"results"`
-	State     map[string]*gomatrix.Event       `json:"state"`
+	State     map[string][]*gomatrix.Event     `json:"state"`
 	Groups    map[string]map[string]GroupValue `json:"groups"`
 	NextBatch *string                          `json:"next_batch,omitempty"`
 }
@@ -216,6 +216,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		//events := make([]string, 0, len(res.Hits))
 		results := make([]Result, 0, len(res.Hits))
+		roomStateMap := map[string][]*gomatrix.Event{}
 
 		for _, hit := range res.Hits {
 			//events = append(events, hit.ID)
@@ -254,13 +255,17 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			results = append(results, result)
 		}
 
+		if q.IncludeState {
+			// fetch state from server using API.
+		}
+
 		//hits, err := json.Marshal(events)
 		hits, err := json.Marshal(Results{
 			Categories{
 				RoomEventResults{
 					Count:   int(res.Total),
 					Results: results,
-					//State: ,
+					State:   roomStateMap,
 					//Groups:,
 					//NextBatch:,
 				},
