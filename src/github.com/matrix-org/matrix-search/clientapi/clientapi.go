@@ -8,6 +8,9 @@ import (
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
 	//"strings"
+	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/search/query"
+	"github.com/fatih/set"
 )
 
 type GroupValue struct {
@@ -83,13 +86,17 @@ type SearchRequest struct {
 	SearchCategories RequestCategories `json:"search_categories"`
 }
 
-func stringInSlice(slice []string, query string) bool {
-	for i := range slice {
-		if slice[i] == query {
-			return true
+func generateQueryList(filterSet []string, fieldName string) []query.Query {
+	if size := len(filterSet); size > 0 {
+		queries := make([]query.Query, 0, size)
+		for i := range filterSet {
+			qr := query.NewTermQuery(filterSet[i])
+			qr.SetField(fieldName)
+			queries = append(queries, qr)
 		}
+		return queries
 	}
-	return false
+	return nil
 }
 
 func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Client) {
@@ -108,23 +115,84 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		}
 
 		q := sr.SearchCategories.RoomEvents
-		roomIDs := q.Filter.Rooms
-		if len(roomIDs) == 0 {
-			resp, err := contextResolver.JoinedRooms()
-			if err != nil {
-				panic(err)
-			}
-			roomIDs = resp.JoinedRooms
+
+		resp, err := contextResolver.JoinedRooms()
+		if err != nil {
+			panic(err)
 		}
 
-		filteredRoomIDs := make([]string, 0, len(roomIDs))
-		for i := range roomIDs {
-			if !stringInSlice(q.Filter.NotRooms, roomIDs[i]) {
-				filteredRoomIDs = append(filteredRoomIDs, roomIDs[i])
-			}
+		joinedRoomIDsSet := set.NewNonTS()
+		for i := range resp.JoinedRooms {
+			joinedRoomIDsSet.Add(resp.JoinedRooms[i])
 		}
 
-		res, err := idxr.QueryMultiple(filteredRoomIDs, q.SearchTerm)
+		wantedRoomIDsSet := set.NewNonTS()
+		for i := range q.Filter.Rooms {
+			wantedRoomIDsSet.Add(q.Filter.Rooms[i])
+		}
+
+		joinedRoomIDsSet.Add("!room1")
+		joinedRoomIDsSet.Add("!room2")
+
+		roomIDsSet := set.Intersection(joinedRoomIDsSet, wantedRoomIDsSet)
+
+		for i := range q.Filter.NotRooms {
+			roomIDsSet.Remove(q.Filter.NotRooms[i])
+		}
+
+		//queryRoomID := make([]query.Query, 0, roomIDsSet.Size())
+		//roomIDsSet.Each(func(item interface{}) bool {
+		//	if roomId, ok := item.(string); ok {
+		//		qr := query.NewTermQuery(roomId)
+		//		qr.SetField("room_id")
+		//		queryRoomID = append(queryRoomID, qr)
+		//	}
+		//	return true
+		//})
+
+		qr := bleve.NewBooleanQuery()
+
+		// Must satisfy room_id
+		qr.AddMust(query.NewDisjunctionQuery(generateQueryList(set.StringSlice(roomIDsSet), "room_id")))
+
+		// Must satisfy sender
+		mustSenders := generateQueryList(q.Filter.Senders, "sender")
+		if len(mustSenders) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustSenders))
+		}
+
+		//if q.Filter.Senders != nil && len(q.Filter.Senders) > 0 {
+		//	senderQuery := query.NewDisjunctionQuery([]query.Query{})
+		//	for i := range q.Filter.Senders {
+		//		qr := query.NewTermQuery(q.Filter.Senders[i])
+		//		qr.SetField("sender")
+		//		senderQuery.AddQuery(qr)
+		//	}
+		//	must = append(must, senderQuery)
+		//}
+
+		// Must satisfy not sender
+		qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
+
+		//if q.Filter.NotSenders != nil && len(q.Filter.NotSenders) > 0 {
+		//	notSenderQuery := query.NewDisjunctionQuery([]query.Query{})
+		//	for i := range q.Filter.NotSenders {
+		//		qr := query.NewTermQuery(q.Filter.NotSenders[i])
+		//	}
+		//}
+
+		// Must satisfy type
+		mustType := generateQueryList(q.Filter.Types, "type")
+		if len(mustType) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustType))
+		}
+
+		// Must satisfy not type
+		qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
+
+		//res, err := idxr.QueryMultiple(set.StringSlice(roomIDsSet), q.SearchTerm)
+		req := bleve.NewSearchRequest(qr)
+		res, err := idxr.Query(req)
 
 		if err != nil {
 			fmt.Println(err)

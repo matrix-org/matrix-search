@@ -69,6 +69,12 @@
 			"branch": "master"
 		},
 		{
+			"importpath": "github.com/fatih/set",
+			"repository": "https://github.com/fatih/set",
+			"revision": "27c40922c40b43fe04554d8223a402af3ea333f3",
+			"branch": "v0.1.1"
+		},
+		{
 			"importpath": "github.com/go-sql-driver/mysql",
 			"repository": "https://github.com/go-sql-driver/mysql",
 			"revision": "9181e3a86a19bacd63e68d43ae8b7b36320d8092",

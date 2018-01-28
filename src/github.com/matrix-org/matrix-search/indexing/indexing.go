@@ -69,33 +69,32 @@ func makeSearchQuery(query string) query.Query {
 	return bleve.NewQueryStringQuery(strings.ToLower(query))
 }
 
-//func (i *Indexer) Query(id, query string) (*bleve.SearchResult, error) {
-//searchRequest := bleve.NewSearchRequest(bleve.NewMatchQuery(query))
-//searchRequest := bleve.NewSearchRequest(bleve.NewFuzzyQuery(query))
-//return i.getIndex(id).Search(makeSearchRequest(query))
-//}
-
-func (i *Indexer) QueryMultiple(roomIds []string, qs string) (*bleve.SearchResult, error) {
-	//targetedIdxs := make([]bleve.Index, len(roomIds))
-	//for j, roomId := range roomIds {
-	//	targetedIdxs[j] = i.getIndex(roomId)
-	//}
-	//collection := bleve.NewIndexAlias(targetedIdxs...)
-	collection := i.getIndex("")
-	request := makeSearchQuery(qs)
-
-	roomIdQueries := make([]query.Query, 0, len(roomIds))
-	for _, roomId := range roomIds {
-		qr := query.NewTermQuery(roomId)
-		qr.SetField("room_id")
-		roomIdQueries = append(roomIdQueries, qr)
-	}
-
-	roomIdQ := query.NewBooleanQuery(nil, roomIdQueries, nil)
-
-	q := bleve.NewConjunctionQuery(roomIdQ, request)
-	return collection.Search(bleve.NewSearchRequest(q))
+func (i *Indexer) Query(sr *bleve.SearchRequest) (*bleve.SearchResult, error) {
+	ix := i.getIndex("")
+	return ix.Search(sr)
 }
+
+//func (i *Indexer) QueryMultiple(roomIds []string, qs string) (*bleve.SearchResult, error) {
+//	//targetedIdxs := make([]bleve.Index, len(roomIds))
+//	//for j, roomId := range roomIds {
+//	//	targetedIdxs[j] = i.getIndex(roomId)
+//	//}
+//	//collection := bleve.NewIndexAlias(targetedIdxs...)
+//	collection := i.getIndex("")
+//	request := makeSearchQuery(qs)
+//
+//	roomIdQueries := make([]query.Query, 0, len(roomIds))
+//	for _, roomId := range roomIds {
+//		qr := query.NewTermQuery(roomId)
+//		qr.SetField("room_id")
+//		roomIdQueries = append(roomIdQueries, qr)
+//	}
+//
+//	roomIdQ := query.NewBooleanQuery(nil, roomIdQueries, nil)
+//
+//	q := bleve.NewConjunctionQuery(roomIdQ, request)
+//	return collection.Search(bleve.NewSearchRequest(q))
+//}
 
 func NewIndexer() Indexer {
 	return Indexer{
