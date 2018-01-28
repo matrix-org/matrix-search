@@ -17,6 +17,7 @@ import (
 	"github.com/blevesearch/bleve/analysis/tokenizer/single"
 	"github.com/blevesearch/bleve/analysis/tokenizer/unicode"
 	"github.com/blevesearch/bleve/mapping"
+	"github.com/blevesearch/bleve/search/query"
 	"github.com/blevesearch/blevex/detectlang"
 	"log"
 	"os"
@@ -31,6 +32,8 @@ type Indexer struct {
 }
 
 func (i *Indexer) getIndex(id string) (idx bleve.Index) {
+	id = "all"
+
 	i.RLock()
 	idx = i.idxs[id]
 	i.RUnlock()
@@ -62,24 +65,36 @@ func (i *Indexer) AddEvent(ID, RoomID string, ev Event) bool {
 	return true
 }
 
-func makeSearchRequest(query string) *bleve.SearchRequest {
-	return bleve.NewSearchRequest(bleve.NewQueryStringQuery(strings.ToLower(query)))
+func makeSearchQuery(query string) query.Query {
+	return bleve.NewQueryStringQuery(strings.ToLower(query))
 }
 
-func (i *Indexer) Query(id, query string) (*bleve.SearchResult, error) {
-	//searchRequest := bleve.NewSearchRequest(bleve.NewMatchQuery(query))
-	//searchRequest := bleve.NewSearchRequest(bleve.NewFuzzyQuery(query))
-	return i.getIndex(id).Search(makeSearchRequest(query))
-}
+//func (i *Indexer) Query(id, query string) (*bleve.SearchResult, error) {
+//searchRequest := bleve.NewSearchRequest(bleve.NewMatchQuery(query))
+//searchRequest := bleve.NewSearchRequest(bleve.NewFuzzyQuery(query))
+//return i.getIndex(id).Search(makeSearchRequest(query))
+//}
 
-func (i *Indexer) QueryMultiple(roomIds []string, query string) (*bleve.SearchResult, error) {
-	targetedIdxs := make([]bleve.Index, len(roomIds))
-	for j, roomId := range roomIds {
-		targetedIdxs[j] = i.getIndex(roomId)
+func (i *Indexer) QueryMultiple(roomIds []string, qs string) (*bleve.SearchResult, error) {
+	//targetedIdxs := make([]bleve.Index, len(roomIds))
+	//for j, roomId := range roomIds {
+	//	targetedIdxs[j] = i.getIndex(roomId)
+	//}
+	//collection := bleve.NewIndexAlias(targetedIdxs...)
+	collection := i.getIndex("")
+	request := makeSearchQuery(qs)
+
+	roomIdQueries := make([]query.Query, 0, len(roomIds))
+	for _, roomId := range roomIds {
+		qr := query.NewTermQuery(roomId)
+		qr.SetField("room_id")
+		roomIdQueries = append(roomIdQueries, qr)
 	}
 
-	collection := bleve.NewIndexAlias(targetedIdxs...)
-	return collection.Search(makeSearchRequest(query))
+	roomIdQ := query.NewBooleanQuery(nil, roomIdQueries, nil)
+
+	q := bleve.NewConjunctionQuery(roomIdQ, request)
+	return collection.Search(bleve.NewSearchRequest(q))
 }
 
 func NewIndexer() Indexer {
@@ -95,7 +110,6 @@ const bleveBasePath = "bleve"
 
 // Bleve connect or create the index persistence
 func Bleve(indexPath string) (bleve.Index, error) {
-
 	//if bleveIdx, exists := bleveIdxMap[indexPath]; exists {
 	//	return bleveIdx, nil
 	//}
@@ -146,11 +160,12 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 	return err
 }
 
-func NewEvent(sender, evType string, content map[string]interface{}, time time.Time) Event {
+func NewEvent(sender, roomID, evType string, content map[string]interface{}, time time.Time) Event {
 	//return interface{}(Event{sender, content, time})
 	return Event{
 		"sender":  sender,
 		"content": content,
+		"room_id": roomID,
 		"type":    evType,
 		"time":    time,
 	}
@@ -237,6 +252,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 
 	eventMapping := bleve.NewDocumentMapping()
 
+	eventMapping.AddFieldMappingsAt("room_id", keywordFieldMapping)
 	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
 	eventMapping.AddFieldMappingsAt("type", keywordFieldMapping)
 

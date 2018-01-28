@@ -7,7 +7,7 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
-	"strings"
+	//"strings"
 )
 
 type GroupValue struct {
@@ -83,6 +83,15 @@ type SearchRequest struct {
 	SearchCategories RequestCategories `json:"search_categories"`
 }
 
+func stringInSlice(slice []string, query string) bool {
+	for i := range slice {
+		if slice[i] == query {
+			return true
+		}
+	}
+	return false
+}
+
 func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Client) {
 	contextResolver := NewResolver(cli)
 
@@ -108,7 +117,14 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			roomIDs = resp.JoinedRooms
 		}
 
-		res, err := idxr.QueryMultiple(roomIDs, q.SearchTerm)
+		filteredRoomIDs := make([]string, 0, len(roomIDs))
+		for i := range roomIDs {
+			if !stringInSlice(q.Filter.NotRooms, roomIDs[i]) {
+				filteredRoomIDs = append(filteredRoomIDs, roomIDs[i])
+			}
+		}
+
+		res, err := idxr.QueryMultiple(filteredRoomIDs, q.SearchTerm)
 
 		if err != nil {
 			fmt.Println(err)
@@ -122,21 +138,21 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		for _, hit := range res.Hits {
 			//events = append(events, hit.ID)
-			segs := strings.SplitN(hit.ID, "/", 2)
-			context, err := contextResolver.resolveEvent(segs[0], segs[1], 2)
-			if err != nil {
-				panic(err)
-			}
+			//segs := strings.SplitN(hit.ID, "/", 2)
+			//context, err := contextResolver.resolveEvent(segs[0], segs[1], 2)
+			//if err != nil {
+			//	panic(err)
+			//}
 			result := Result{
-				Rank:   hit.Score,
-				Result: context.Event,
-				Context: &EventContext{
-					Start:        context.Start,
-					End:          context.End,
-					ProfileInfo:  map[string]*UserProfile{},
-					EventsBefore: context.EventsBefore,
-					EventsAfter:  context.EventsAfter,
-				},
+				Rank: hit.Score,
+				//Result: context.Event,
+				//Context: &EventContext{
+				//	Start:        context.Start,
+				//	End:          context.End,
+				//	ProfileInfo:  map[string]*UserProfile{},
+				//	EventsBefore: context.EventsBefore,
+				//	EventsAfter:  context.EventsAfter,
+				//},
 			}
 			results = append(results, result)
 		}

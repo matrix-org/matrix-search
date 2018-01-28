@@ -70,7 +70,7 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 		}
 
 		ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
-		iev := indexing.NewEvent(ev.Sender, ev.Type, ev.Content, ts)
+		iev := indexing.NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
 		// TODO handle err from AddEvent and bail txn processing
 		indexer.AddEvent(ev.ID, ev.RoomID, iev)
 	}
