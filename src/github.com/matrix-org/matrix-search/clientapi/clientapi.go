@@ -3,13 +3,13 @@ package clientapi
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/search/query"
+	"github.com/fatih/set"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
-	"github.com/blevesearch/bleve"
-	"github.com/blevesearch/bleve/search/query"
-	"github.com/fatih/set"
 	"strings"
 )
 
@@ -191,7 +191,17 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
 
 		// The user-entered query string
-		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
+		if len(q.Keys) > 0 {
+			oneOf := query.NewDisjunctionQuery(nil)
+			for _, key := range q.Keys {
+				qrs := query.NewMatchQuery(strings.ToLower(q.SearchTerm))
+				qrs.SetField(key)
+				oneOf.AddQuery(qrs)
+			}
+			qr.AddMust(oneOf)
+		} else {
+			qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
+		}
 
 		//res, err := idxr.QueryMultiple(set.StringSlice(roomIDsSet), q.SearchTerm)
 		req := bleve.NewSearchRequest(qr)
