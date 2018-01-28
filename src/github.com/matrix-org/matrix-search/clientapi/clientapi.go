@@ -7,10 +7,10 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
-	//"strings"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/fatih/set"
+	"strings"
 )
 
 type GroupValue struct {
@@ -189,6 +189,9 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		// Must satisfy not type
 		qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
+
+		// The user-entered query string
+		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
 
 		//res, err := idxr.QueryMultiple(set.StringSlice(roomIDsSet), q.SearchTerm)
 		req := bleve.NewSearchRequest(qr)
