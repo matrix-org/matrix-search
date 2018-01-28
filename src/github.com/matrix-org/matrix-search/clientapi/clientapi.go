@@ -219,22 +219,38 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		for _, hit := range res.Hits {
 			//events = append(events, hit.ID)
-			//segs := strings.SplitN(hit.ID, "/", 2)
-			//context, err := contextResolver.resolveEvent(segs[0], segs[1], 2)
-			//if err != nil {
-			//	panic(err)
-			//}
-			result := Result{
-				Rank: hit.Score,
-				//Result: context.Event,
-				//Context: &EventContext{
-				//	Start:        context.Start,
-				//	End:          context.End,
-				//	ProfileInfo:  map[string]*UserProfile{},
-				//	EventsBefore: context.EventsBefore,
-				//	EventsAfter:  context.EventsAfter,
-				//},
+			segs := strings.SplitN(hit.ID, "/", 2)
+			context, err := contextResolver.resolveEvent(segs[0], segs[1], 2)
+			if err != nil {
+				panic(err)
 			}
+			result := Result{
+				Rank:   hit.Score,
+				Result: context.Event,
+				Context: &EventContext{
+					Start:        context.Start,
+					End:          context.End,
+					ProfileInfo:  map[string]*UserProfile{},
+					EventsBefore: context.EventsBefore,
+					EventsAfter:  context.EventsAfter,
+				},
+			}
+
+			for _, ev := range context.State {
+				if ev.Type == "m.room.member" {
+					userProfile := UserProfile{}
+
+					if str, ok := ev.Content["displayname"].(string); ok {
+						userProfile.DisplayName = str
+					}
+					if str, ok := ev.Content["avatar_url"].(string); ok {
+						userProfile.AvatarURL = str
+					}
+
+					result.Context.ProfileInfo[*ev.StateKey] = &userProfile
+				}
+			}
+
 			results = append(results, result)
 		}
 
