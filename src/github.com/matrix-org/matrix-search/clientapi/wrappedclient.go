@@ -43,7 +43,7 @@ type RespContext struct {
 	State        []*gomatrix.Event `json:"state"`
 }
 
-func (cli *WrappedClient) resolveEvent(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
+func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
@@ -57,6 +57,14 @@ func (cli *WrappedClient) resolveEvent(roomID, eventID string, beforeLimit, afte
 	})
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 	return
+}
+
+func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *gomatrix.Event, err error) {
+	cli.Lock()
+	defer cli.Unlock()
+
+	urlPath := cli.BuildURL("rooms", roomID, "event", eventID)
+	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 }
 
 func NewWrappedClient(userID, hsURL, localpart, token string) (wp *WrappedClient, err error) {

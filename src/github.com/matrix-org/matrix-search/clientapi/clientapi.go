@@ -211,7 +211,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 		eventID := segs[1]
 
 		if wantsContext {
-			context, err := cli.resolveEvent(roomID, eventID, beforeLimit, afterLimit)
+			context, err := cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
 			if err != nil {
 				return
 			}
@@ -242,7 +242,11 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 				}
 			}
 		} else {
-			// TODO get event by itself, new API
+			ev, err := cli.resolveEvent(roomID, eventID)
+			if err != nil {
+				return
+			}
+			result.Result = ev
 		}
 
 		results = append(results, result)
