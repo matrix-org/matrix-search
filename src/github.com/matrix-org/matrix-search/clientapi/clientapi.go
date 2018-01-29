@@ -99,9 +99,7 @@ func generateQueryList(filterSet []string, fieldName string) []query.Query {
 	return nil
 }
 
-func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Client, hsURL, localpart, token string) {
-	contextResolver := NewResolver(cli)
-
+func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL, localpart, token string) {
 	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
 		var sr SearchRequest
 		if r.Body == nil {
