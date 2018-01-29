@@ -54,11 +54,16 @@ func (r *Resolver) LatestState(roomID string) (resp []*gomatrix.Event, err error
 	return
 }
 
-func (r *Resolver) resolveEvent(roomID, eventID string, limit int) (resp *RespContext, err error) {
+func (r *Resolver) resolveEvent(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
 	r.Lock()
 	defer r.Unlock()
 
 	r.AppServiceUserID = "@testguy:synapse"
+
+	limit := beforeLimit
+	if afterLimit > beforeLimit {
+		limit = afterLimit
+	}
 
 	urlPath := r.BuildURLWithQuery([]string{"rooms", roomID, "context", eventID}, map[string]string{
 		"limit": strconv.Itoa(limit),

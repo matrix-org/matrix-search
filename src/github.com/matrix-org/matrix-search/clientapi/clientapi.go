@@ -231,7 +231,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		for _, hit := range res.Hits {
 			//events = append(events, hit.ID)
 			segs := strings.SplitN(hit.ID, "/", 2)
-			context, err := contextResolver.resolveEvent(segs[0], segs[1], 2)
+			context, err := contextResolver.resolveEvent(segs[0], segs[1], beforeLimit, afterLimit)
 			if err != nil {
 				panic(err)
 			}
