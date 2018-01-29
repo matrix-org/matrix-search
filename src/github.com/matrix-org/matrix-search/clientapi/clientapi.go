@@ -14,35 +14,35 @@ import (
 )
 
 type GroupValue struct {
-	NextBatch *string  `json:"next_batch"`
-	Order     int      `json:"order"`
-	Results   []string `json:"results"`
+	NextBatch *string  `json:"next_batch,omitempty"`
+	Order     int      `json:"order,omitempty"`
+	Results   []string `json:"results,omitempty"`
 }
 
 type UserProfile struct {
-	DisplayName string `json:"displayname"`
-	AvatarURL   string `json:"avatar_url"`
+	DisplayName string `json:"displayname,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 }
 
 type EventContext struct {
-	Start        string                  `json:"start"`
-	End          string                  `json:"end"`
+	Start        string                  `json:"start,omitempty"`
+	End          string                  `json:"end,omitempty"`
 	ProfileInfo  map[string]*UserProfile `json:"profile_info,omitempty"`
-	EventsBefore []*gomatrix.Event       `json:"events_before"`
-	EventsAfter  []*gomatrix.Event       `json:"events_after"`
+	EventsBefore []*gomatrix.Event       `json:"events_before,omitempty"`
+	EventsAfter  []*gomatrix.Event       `json:"events_after,omitempty"`
 }
 
 type Result struct {
 	Rank    float64         `json:"rank"`
 	Result  *gomatrix.Event `json:"result"`
-	Context *EventContext   `json:"context"`
+	Context *EventContext   `json:"context,omitempty"`
 }
 
 type RoomEventResults struct {
 	Count     int                              `json:"count"`
 	Results   []Result                         `json:"results"`
-	State     map[string][]*gomatrix.Event     `json:"state"`
-	Groups    map[string]map[string]GroupValue `json:"groups"`
+	State     map[string][]*gomatrix.Event     `json:"state,omitempty"`
+	Groups    map[string]map[string]GroupValue `json:"groups,omitempty"`
 	NextBatch *string                          `json:"next_batch,omitempty"`
 }
 
@@ -69,13 +69,13 @@ type RequestEventContext struct {
 }
 
 type RequestRoomEvents struct {
-	SearchTerm   string              `json:"search_term"`
-	Keys         []string            `json:"keys"`
-	Filter       gomatrix.FilterPart `json:"filter"`
-	OrderBy      string              `json:"order_by"`      // recent/rank // TODO
-	EventContext RequestEventContext `json:"event_context"` // TODO
-	IncludeState bool                `json:"include_state"`
-	Groupings    []RequestGroupings  `json:"groupings"` // TODO
+	SearchTerm   string               `json:"search_term"`
+	Keys         []string             `json:"keys"`
+	Filter       gomatrix.FilterPart  `json:"filter"`
+	OrderBy      string               `json:"order_by"` // recent/rank // TODO
+	EventContext *RequestEventContext `json:"event_context"`
+	IncludeState bool                 `json:"include_state"`
+	Groupings    []RequestGroupings   `json:"groupings"` // TODO
 }
 
 type RequestCategories struct {
@@ -115,16 +115,6 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		}
 
 		q := sr.SearchCategories.RoomEvents
-		beforeLimit := 5
-		afterLimit := 5
-		includeProfile := q.EventContext.IncludeProfile
-
-		if q.EventContext.BeforeLimit != nil {
-			beforeLimit = *q.EventContext.BeforeLimit
-		}
-		if q.EventContext.AfterLimit != nil {
-			afterLimit = *q.EventContext.AfterLimit
-		}
 
 		resp, err := contextResolver.JoinedRooms()
 		if err != nil {
@@ -199,41 +189,61 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		results := make([]Result, 0, len(res.Hits))
 		rooms := map[string]struct{}{}
 
+		wantsContext := q.EventContext != nil
+
+		beforeLimit := 5
+		afterLimit := 5
+		includeProfile := q.EventContext.IncludeProfile
+
+		if q.EventContext.BeforeLimit != nil {
+			beforeLimit = *q.EventContext.BeforeLimit
+		}
+		if q.EventContext.AfterLimit != nil {
+			afterLimit = *q.EventContext.AfterLimit
+		}
+
 		for _, hit := range res.Hits {
-			//events = append(events, hit.ID)
-			segs := strings.SplitN(hit.ID, "/", 2)
-			context, err := contextResolver.resolveEvent(segs[0], segs[1], beforeLimit, afterLimit)
-			if err != nil {
-				panic(err)
-			}
+
 			result := Result{
-				Rank:   hit.Score,
-				Result: context.Event,
-				Context: &EventContext{
+				Rank: hit.Score,
+			}
+
+			segs := strings.SplitN(hit.ID, "/", 2)
+			roomID := segs[0]
+			eventID := segs[1]
+
+			if wantsContext {
+				context, err := contextResolver.resolveEvent(roomID, eventID, beforeLimit, afterLimit)
+				if err != nil {
+					panic(err)
+				}
+				result.Result = context.Event
+				result.Context = &EventContext{
 					Start:        context.Start,
 					End:          context.End,
 					EventsBefore: context.EventsBefore,
 					EventsAfter:  context.EventsAfter,
-				},
-			}
-
-			if includeProfile {
-				result.Context.ProfileInfo = make(map[string]*UserProfile)
-			}
-
-			for _, ev := range context.State {
-				if ev.Type == "m.room.member" {
-					userProfile := UserProfile{}
-
-					if str, ok := ev.Content["displayname"].(string); ok {
-						userProfile.DisplayName = str
-					}
-					if str, ok := ev.Content["avatar_url"].(string); ok {
-						userProfile.AvatarURL = str
-					}
-
-					result.Context.ProfileInfo[*ev.StateKey] = &userProfile
 				}
+
+				if includeProfile {
+					result.Context.ProfileInfo = make(map[string]*UserProfile)
+					for _, ev := range context.State {
+						if ev.Type == "m.room.member" {
+							userProfile := UserProfile{}
+
+							if str, ok := ev.Content["displayname"].(string); ok {
+								userProfile.DisplayName = str
+							}
+							if str, ok := ev.Content["avatar_url"].(string); ok {
+								userProfile.AvatarURL = str
+							}
+
+							result.Context.ProfileInfo[*ev.StateKey] = &userProfile
+						}
+					}
+				}
+			} else {
+				// TODO get event by itself, new API
 			}
 
 			results = append(results, result)
