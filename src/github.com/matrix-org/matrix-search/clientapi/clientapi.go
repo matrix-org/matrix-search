@@ -73,7 +73,7 @@ type RequestRoomEvents struct {
 	SearchTerm   string               `json:"search_term"`
 	Keys         []string             `json:"keys"`
 	Filter       gomatrix.FilterPart  `json:"filter"`
-	OrderBy      string               `json:"order_by"` // recent/rank // TODO
+	OrderBy      string               `json:"order_by"`
 	EventContext *RequestEventContext `json:"event_context"`
 	IncludeState bool                 `json:"include_state"`
 	Groupings    []RequestGroupings   `json:"groupings"` // TODO
@@ -178,6 +178,10 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 	}
 
 	req := bleve.NewSearchRequest(qr)
+	// TODO be less naive on rank/recent check
+	if q.OrderBy == "recent" {
+		req.SortBy([]string{"-time"})
+	}
 	res, err := idxr.Query(req)
 
 	if err != nil {
