@@ -41,6 +41,19 @@ func (r *Resolver) JoinedRooms() (resp *RespJoinedRooms, err error) {
 	return
 }
 
+func (r *Resolver) LatestState(roomID string) (resp []*gomatrix.Event, err error) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.AppServiceUserID = "@testguy:synapse"
+
+	urlPath := r.BuildURL("rooms", roomID, "state")
+	_, err = r.MakeRequest("GET", urlPath, nil, &resp)
+
+	r.AppServiceUserID = ""
+	return
+}
+
 func (r *Resolver) resolveEvent(roomID, eventID string, limit int) (resp *RespContext, err error) {
 	r.Lock()
 	defer r.Unlock()

@@ -27,7 +27,7 @@ type UserProfile struct {
 type EventContext struct {
 	Start        string                  `json:"start"`
 	End          string                  `json:"end"`
-	ProfileInfo  map[string]*UserProfile `json:"profile_info"`
+	ProfileInfo  map[string]*UserProfile `json:"profile_info,omitempty"`
 	EventsBefore []*gomatrix.Event       `json:"events_before"`
 	EventsAfter  []*gomatrix.Event       `json:"events_after"`
 }
@@ -63,19 +63,19 @@ type RequestGroupings struct {
 }
 
 type RequestEventContext struct {
-	BeforeLimit    int  `json:"before_limit"`
-	AfterLimit     int  `json:"after_limit"`
+	BeforeLimit    *int `json:"before_limit"`
+	AfterLimit     *int `json:"after_limit"`
 	IncludeProfile bool `json:"include_profile"`
 }
 
 type RequestRoomEvents struct {
-	SearchTerm string              `json:"search_term"`
-	Keys       []string            `json:"keys"`
-	Filter     gomatrix.FilterPart `json:"filter"`
-	OrderBy    string              `json:"order_by"` // recent/rank
-	//EventContext
-	IncludeState bool               `json:"include_state"`
-	Groupings    []RequestGroupings `json:"groupings"`
+	SearchTerm   string              `json:"search_term"`
+	Keys         []string            `json:"keys"`
+	Filter       gomatrix.FilterPart `json:"filter"`
+	OrderBy      string              `json:"order_by"`      // recent/rank // TODO
+	EventContext RequestEventContext `json:"event_context"` // TODO
+	IncludeState bool                `json:"include_state"`
+	Groupings    []RequestGroupings  `json:"groupings"` // TODO
 }
 
 type RequestCategories struct {
@@ -115,6 +115,16 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		}
 
 		q := sr.SearchCategories.RoomEvents
+		beforeLimit := 5
+		afterLimit := 5
+		includeProfile := q.EventContext.IncludeProfile
+
+		if q.EventContext.BeforeLimit != nil {
+			beforeLimit = *q.EventContext.BeforeLimit
+		}
+		if q.EventContext.AfterLimit != nil {
+			afterLimit = *q.EventContext.AfterLimit
+		}
 
 		resp, err := contextResolver.JoinedRooms()
 		if err != nil {
@@ -216,7 +226,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		//events := make([]string, 0, len(res.Hits))
 		results := make([]Result, 0, len(res.Hits))
-		roomStateMap := map[string][]*gomatrix.Event{}
+		rooms := map[string]struct{}{}
 
 		for _, hit := range res.Hits {
 			//events = append(events, hit.ID)
@@ -231,10 +241,13 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 				Context: &EventContext{
 					Start:        context.Start,
 					End:          context.End,
-					ProfileInfo:  map[string]*UserProfile{},
 					EventsBefore: context.EventsBefore,
 					EventsAfter:  context.EventsAfter,
 				},
+			}
+
+			if includeProfile {
+				result.Context.ProfileInfo = make(map[string]*UserProfile)
 			}
 
 			for _, ev := range context.State {
@@ -253,10 +266,19 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			}
 
 			results = append(results, result)
+			rooms[result.Result.RoomID] = struct{}{}
 		}
 
+		roomStateMap := map[string][]*gomatrix.Event{}
 		if q.IncludeState {
 			// fetch state from server using API.
+			for roomID := range rooms {
+				state, err := contextResolver.LatestState(roomID)
+				if err != nil {
+					panic(err)
+				}
+				roomStateMap[roomID] = state
+			}
 		}
 
 		//hits, err := json.Marshal(events)
