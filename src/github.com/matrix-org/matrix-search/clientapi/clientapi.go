@@ -150,16 +150,6 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			roomIDsSet.Remove(q.Filter.NotRooms[i])
 		}
 
-		//queryRoomID := make([]query.Query, 0, roomIDsSet.Size())
-		//roomIDsSet.Each(func(item interface{}) bool {
-		//	if roomId, ok := item.(string); ok {
-		//		qr := query.NewTermQuery(roomId)
-		//		qr.SetField("room_id")
-		//		queryRoomID = append(queryRoomID, qr)
-		//	}
-		//	return true
-		//})
-
 		qr := bleve.NewBooleanQuery()
 
 		// Must satisfy room_id
@@ -171,25 +161,8 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			qr.AddMust(query.NewDisjunctionQuery(mustSenders))
 		}
 
-		//if q.Filter.Senders != nil && len(q.Filter.Senders) > 0 {
-		//	senderQuery := query.NewDisjunctionQuery([]query.Query{})
-		//	for i := range q.Filter.Senders {
-		//		qr := query.NewTermQuery(q.Filter.Senders[i])
-		//		qr.SetField("sender")
-		//		senderQuery.AddQuery(qr)
-		//	}
-		//	must = append(must, senderQuery)
-		//}
-
 		// Must satisfy not sender
 		qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
-
-		//if q.Filter.NotSenders != nil && len(q.Filter.NotSenders) > 0 {
-		//	notSenderQuery := query.NewDisjunctionQuery([]query.Query{})
-		//	for i := range q.Filter.NotSenders {
-		//		qr := query.NewTermQuery(q.Filter.NotSenders[i])
-		//	}
-		//}
 
 		// Must satisfy type
 		mustType := generateQueryList(q.Filter.Types, "type")
@@ -213,7 +186,6 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
 		}
 
-		//res, err := idxr.QueryMultiple(set.StringSlice(roomIDsSet), q.SearchTerm)
 		req := bleve.NewSearchRequest(qr)
 		res, err := idxr.Query(req)
 
@@ -224,7 +196,6 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			// TODO handle err
 		}
 
-		//events := make([]string, 0, len(res.Hits))
 		results := make([]Result, 0, len(res.Hits))
 		rooms := map[string]struct{}{}
 
