@@ -1,6 +1,7 @@
 package common
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/gorilla/mux"
@@ -39,7 +40,18 @@ func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
 	return
 }
 
-func Setup(cli *gomatrix.Client) (idxr indexing.Indexer, r *mux.Router) {
+func MakeClient(hsURL, localpart, token string) (cli *gomatrix.Client, err error) {
+	cli, err = gomatrix.NewClient(hsURL, localpart, token)
+	if err != nil {
+		return
+	}
+	cli.Client = &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}}
+	return
+}
+
+func Setup(hsURL, localpart, token string) (idxr indexing.Indexer, r *mux.Router) {
 	idxr = indexing.NewIndexer()
 
 	r = mux.NewRouter()
@@ -50,7 +62,7 @@ func Setup(cli *gomatrix.Client) (idxr indexing.Indexer, r *mux.Router) {
 		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	}
 
-	clientapi.RegisterHandler(r, idxr, cli)
+	clientapi.RegisterHandler(r, idxr, hsURL, localpart, token)
 
 	return
 }

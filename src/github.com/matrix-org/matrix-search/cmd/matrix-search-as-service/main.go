@@ -14,14 +14,7 @@ func main() {
 		panic("MISSING")
 	}
 
-	cli, err := gomatrix.NewClient(conf.Homeserver.URL, reg.SenderLocalpart, reg.ASToken)
-	if err != nil {
-		panic(err)
-	}
-	cli.Client = &http.Client{Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}}
-	idxr, r := common.Setup(cli)
+	idxr, r := common.Setup(conf.Homeserver.URL, reg.SenderLocalpart, reg.ASToken)
 
 	appservice.RegisterHandler(r, idxr, reg.HSToken)
 

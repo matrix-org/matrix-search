@@ -99,7 +99,7 @@ func generateQueryList(filterSet []string, fieldName string) []query.Query {
 	return nil
 }
 
-func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Client) {
+func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Client, hsURL, localpart, token string) {
 	contextResolver := NewResolver(cli)
 
 	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,14 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 
 		q := sr.SearchCategories.RoomEvents
 
-		resp, err := contextResolver.JoinedRooms()
+		// Should we use the Token given in the REQ then lookup their userid or WAT
+		cli, err := NewWrappedClient("@testguy:synapse", hsURL, localpart, token)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		resp, err := cli.joinedRooms()
 		if err != nil {
 			panic(err)
 		}
@@ -213,7 +220,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 			eventID := segs[1]
 
 			if wantsContext {
-				context, err := contextResolver.resolveEvent(roomID, eventID, beforeLimit, afterLimit)
+				context, err := cli.resolveEvent(roomID, eventID, beforeLimit, afterLimit)
 				if err != nil {
 					panic(err)
 				}
@@ -254,7 +261,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, cli *gomatrix.Cl
 		if q.IncludeState {
 			// fetch state from server using API.
 			for roomID := range rooms {
-				state, err := contextResolver.LatestState(roomID)
+				state, err := cli.latestState(roomID)
 				if err != nil {
 					panic(err)
 				}
