@@ -65,13 +65,22 @@ func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *gomatrix.E
 
 	urlPath := cli.BuildURL("rooms", roomID, "event", eventID)
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
+	return
 }
 
-func NewWrappedClient(userID, hsURL, localpart, token string) (wp *WrappedClient, err error) {
+func NewWrappedASClient(userID, hsURL, localpart, token string) (wp *WrappedClient, err error) {
 	cli, err := common.MakeClient(hsURL, localpart, token)
 	if err != nil {
 		return
 	}
 	cli.AppServiceUserID = userID
+	return &WrappedClient{Client: cli}, nil
+}
+
+func NewWrappedClient(hsURL, localpart, token string) (wp *WrappedClient, err error) {
+	cli, err := common.MakeClient(hsURL, localpart, token)
+	if err != nil {
+		return
+	}
 	return &WrappedClient{Client: cli}, nil
 }

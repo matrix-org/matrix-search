@@ -1,11 +1,9 @@
 package main
 
 import (
-	"crypto/tls"
-	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/appservice"
+	"github.com/matrix-org/matrix-search/clientapi"
 	"github.com/matrix-org/matrix-search/common"
-	"net/http"
 )
 
 func main() {
@@ -14,7 +12,9 @@ func main() {
 		panic("MISSING")
 	}
 
-	idxr, r := common.Setup(conf.Homeserver.URL, reg.SenderLocalpart, reg.ASToken)
+	idxr, r := common.Setup()
+
+	clientapi.RegisterHandler(r, idxr, conf.Homeserver.URL)
 
 	appservice.RegisterHandler(r, idxr, reg.HSToken)
 

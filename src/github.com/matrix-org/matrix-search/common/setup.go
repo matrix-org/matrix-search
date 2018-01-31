@@ -7,7 +7,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/appservice"
-	"github.com/matrix-org/matrix-search/clientapi"
 	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"log"
@@ -51,7 +50,7 @@ func MakeClient(hsURL, localpart, token string) (cli *gomatrix.Client, err error
 	return
 }
 
-func Setup(hsURL, localpart, token string) (idxr indexing.Indexer, r *mux.Router) {
+func Setup() (idxr indexing.Indexer, r *mux.Router) {
 	idxr = indexing.NewIndexer()
 
 	r = mux.NewRouter()
@@ -61,8 +60,6 @@ func Setup(hsURL, localpart, token string) (idxr indexing.Indexer, r *mux.Router
 		r.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	}
-
-	clientapi.RegisterHandler(r, idxr, hsURL, localpart, token)
 
 	return
 }

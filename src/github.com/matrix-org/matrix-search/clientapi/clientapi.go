@@ -3,7 +3,9 @@ package clientapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/fatih/set"
 	"github.com/gorilla/mux"
@@ -100,7 +102,7 @@ func generateQueryList(filterSet []string, fieldName string) []query.Query {
 	return nil
 }
 
-func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token string) (resp interface{}, err error) {
+func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string) (resp interface{}, err error) {
 	var sr SearchRequest
 	if body == nil {
 		err = errors.New("please send a request body")
@@ -113,7 +115,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 	}
 
 	// TODO Should we use the Token given in the REQ then lookup their userid or WAT
-	cli, err := NewWrappedClient("@testguy:synapse", hsURL, localpart, token)
+	cli, err := NewWrappedClient(hsURL, "", token)
 	if err != nil {
 		return
 	}
@@ -180,7 +182,13 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 	req := bleve.NewSearchRequest(qr)
 	// TODO be less naive on rank/recent check
 	if q.OrderBy == "recent" {
-		req.SortBy([]string{"-time"})
+		//req.SortBy([]string{"-time"})
+		req.SortByCustom(search.SortOrder{
+			&search.SortField{
+				Field: "time",
+				Desc:  true,
+			},
+		})
 	}
 	res, err := idxr.Query(req)
 
@@ -215,7 +223,8 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 		eventID := segs[1]
 
 		if wantsContext {
-			context, err := cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
+			var context *RespContext
+			context, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
 			if err != nil {
 				return
 			}
@@ -246,7 +255,8 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 				}
 			}
 		} else {
-			ev, err := cli.resolveEvent(roomID, eventID)
+			var ev *gomatrix.Event
+			ev, err = cli.resolveEvent(roomID, eventID)
 			if err != nil {
 				return
 			}
@@ -261,11 +271,12 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 	if q.IncludeState {
 		// fetch state from server using API.
 		for roomID := range rooms {
-			state, err := cli.latestState(roomID)
+			var stateEvs []*gomatrix.Event
+			stateEvs, err = cli.latestState(roomID)
 			if err != nil {
 				return
 			}
-			roomStateMap[roomID] = state
+			roomStateMap[roomID] = stateEvs
 		}
 	}
 
@@ -283,11 +294,36 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, localpart, token 
 	return
 }
 
-func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL, localpart, token string) {
+func getToken(r *http.Request) (string, bool) {
+	header := r.Header.Get("Authorization")
+	if strings.HasPrefix(header, "Bearer ") {
+		return strings.TrimPrefix(header, "Bearer "), true
+	}
+
+	if keys, ok := r.URL.Query()["key"]; ok && len(keys) == 1 {
+		return keys[0], true
+	}
+
+	return "", false
+}
+
+func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
 	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := handler(r.Body, idxr, hsURL, localpart, token)
+		token, ok := getToken(r)
+
+		if !ok {
+			http.Error(w, "access_token missing", http.StatusUnauthorized)
+		}
+
+		resp, err := handler(r.Body, idxr, hsURL, token)
 
 		if err != nil {
+			if e, ok := err.(gomatrix.HTTPError); ok {
+				wrapped := e.WrappedError
+				fmt.Println(e, wrapped)
+				// http.Error...
+				// return
+			}
 			http.Error(w, err.Error(), 400)
 			return
 		}
