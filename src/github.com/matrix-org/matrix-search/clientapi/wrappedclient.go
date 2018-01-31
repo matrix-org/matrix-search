@@ -47,10 +47,7 @@ func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimi
 	cli.Lock()
 	defer cli.Unlock()
 
-	limit := beforeLimit
-	if afterLimit > beforeLimit {
-		limit = afterLimit
-	}
+	limit := 1 + beforeLimit + afterLimit
 
 	urlPath := cli.BuildURLWithQuery([]string{"rooms", roomID, "context", eventID}, map[string]string{
 		"limit": strconv.Itoa(limit),
