@@ -18,6 +18,8 @@ import (
 
 var pathPtr = flag.String("path", "my_registration_file.yaml", "The path to which to write the generated Registration YAML")
 
+var bindPtr = flag.String("bind", "127.0.0.1:9999", "The host:port to bind to")
+
 var configPathPtr = flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
 var PprofEnabledPtr = flag.Bool("pprof", false, "Whether or not to enable Pprof debugging")
 
@@ -67,7 +69,7 @@ func Setup() (idxr indexing.Indexer, r *mux.Router) {
 func Begin(handler http.Handler, conf *config.Config) {
 	srv := &http.Server{
 		Handler:      handler,
-		Addr:         "127.0.0.1:9999",
+		Addr:         *bindPtr,
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
 	}
