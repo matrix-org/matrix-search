@@ -12,7 +12,6 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
-	"go/types"
 	"io"
 	"net/http"
 	"strings"
@@ -41,9 +40,9 @@ type ResultSet struct {
 }
 
 type Result struct {
-	Rank    float64         `json:"rank"`
-	Result  *gomatrix.Event `json:"result"`
-	Context *EventContext   `json:"context,omitempty"`
+	Rank    float64       `json:"rank"`
+	Result  *WrappedEvent `json:"result"`
+	Context *EventContext `json:"context,omitempty"`
 }
 
 //type ContextMap map[string]map[string]*EventContext
@@ -208,7 +207,7 @@ func (fp *FilterPart) checkFields(roomID, sender, evType string, isURL bool) boo
 	return true
 }
 
-func (fp *FilterPart) filterEv(ev *gomatrix.Event) bool {
+func (fp *FilterPart) filterEv(ev *WrappedEvent) bool {
 	sender := ev.Sender
 	roomID := ev.RoomID
 	evType := ev.Type
@@ -334,7 +333,7 @@ func splitRoomEventIDs(str string) (roomID, eventID string) {
 	return segs[0], segs[1]
 }
 
-func glueRoomEventIDs(ev *gomatrix.Event) string {
+func glueRoomEventIDs(ev *WrappedEvent) string {
 	return ev.RoomID + "/" + ev.ID
 }
 
@@ -613,7 +612,7 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 
 	switch orderBy {
 	case "rank":
-		eventMap, total, allowedEvents, err := searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, searchFilter.Limit, eventContext)
+		eventMap, total, allowedEvents, err := searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, 0, searchFilter.Limit, eventContext)
 		if err != nil {
 			return
 		}
@@ -644,8 +643,8 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		//allowedEvents = eventMap[:searchFilter.Limit]
 
 		for _, e := range allowedEvents {
-			roomID, eventID := splitRoomEventIDs(e.ID)
-			res := eventMap[roomID][eventID]
+			//roomID, eventID := splitRoomEventIDs(e.ID)
+			res := eventMap[e.ID]
 			ev := res.Result
 
 			if _, ok := roomGroups[ev.RoomID]; !ok {
@@ -668,6 +667,8 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 			// only put ProfileInfo in for eventMap that are given
 		}
 	}
+
+	// TODO rest of processing
 }
 
 type SearchGroup struct {
@@ -849,7 +850,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 				}
 			}
 		} else {
-			var ev *gomatrix.Event
+			var ev *WrappedEvent
 			ev, err = cli.resolveEvent(roomID, eventID)
 			if err != nil {
 				return

@@ -8,6 +8,10 @@ func (ss StringSet) AddStrings(str []string) {
 	}
 }
 
+func (ss StringSet) AddString(str string) {
+	ss[str] = struct{}{}
+}
+
 func (ss StringSet) Has(str string) bool {
 	_, exists := ss[str]
 	return exists

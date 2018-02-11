@@ -38,7 +38,7 @@ type RespContext struct {
 	Start        string            `json:"start"`
 	End          string            `json:"end"`
 	EventsBefore []*gomatrix.Event `json:"events_before"`
-	Event        *gomatrix.Event   `json:"event"`
+	Event        *WrappedEvent     `json:"event"`
 	EventsAfter  []*gomatrix.Event `json:"events_after"`
 	State        []*gomatrix.Event `json:"state"`
 }
@@ -123,7 +123,7 @@ func NewWrappedClient(hsURL, localpart, token string) (wp *WrappedClient, err er
 
 type SearchResultProcessor interface {
 	build(id string, includeProfile bool) *Result
-	getEv() *gomatrix.Event
+	getEv() *WrappedEvent
 }
 
 func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
@@ -138,10 +138,20 @@ func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
 	}
 
 	if includeProfile {
+		var senders common.StringSet
+
+		for _, ev := range ctx.EventsBefore {
+			senders.AddString(ev.Sender)
+		}
+		for _, ev := range ctx.EventsAfter {
+			senders.AddString(ev.Sender)
+		}
+		senders.AddString(ctx.Event.Sender)
+
 		result.Context.ProfileInfo = make(map[string]*UserProfile)
 		for _, ev := range ctx.State {
-			// if is StateEvent and of Type m.room.member
-			if ev.StateKey != nil && ev.Type == "m.room.member" {
+			// if is StateEvent and of Type m.room.member and StateKey(Sender) is in this Context
+			if ev.StateKey != nil && ev.Type == "m.room.member" && senders.Has(*ev.StateKey) {
 				userProfile := UserProfile{}
 
 				if str, ok := ev.Content["displayname"].(string); ok {
@@ -159,17 +169,16 @@ func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
 	return
 }
 
-func (ctx *RespContext) getEv() *gomatrix.Event {
+func (ctx *RespContext) getEv() *WrappedEvent {
 	return ctx.Event
 }
 
 func (ev *WrappedEvent) build(id string, includeProfile bool) (result *Result) {
 	return &Result{
-		Result: ev.getEv(),
+		Result: ev,
 	}
 }
 
-func (ev *WrappedEvent) getEv() *gomatrix.Event {
-	event := gomatrix.Event(*ev)
-	return &event
+func (ev *WrappedEvent) getEv() *WrappedEvent {
+	return ev
 }
