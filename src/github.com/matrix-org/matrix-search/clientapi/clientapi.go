@@ -682,7 +682,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 	qr := bleve.NewBooleanQuery()
 
 	// Must satisfy room_id
-	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(set.StringSlice(roomIDsSet), "room_id")))
+	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(common.NewStringSet(set.StringSlice(roomIDsSet)), "room_id")))
 
 	// Must satisfy sender
 	mustSenders := generateQueryList(q.Filter.Senders, "sender")
