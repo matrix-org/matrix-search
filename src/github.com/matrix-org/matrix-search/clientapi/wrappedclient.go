@@ -53,6 +53,12 @@ func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimi
 		"limit": strconv.Itoa(limit),
 	})
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
+
+	if err != nil {
+		resp.EventsAfter = resp.EventsAfter[:afterLimit]
+		resp.EventsBefore = resp.EventsBefore[:beforeLimit]
+	}
+
 	return
 }
 
@@ -62,6 +68,37 @@ func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *gomatrix.E
 
 	urlPath := cli.BuildURL("rooms", roomID, "event", eventID)
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
+	return
+}
+
+type eventTuple struct {
+	roomID  string
+	eventID string
+}
+
+func (cli *WrappedClient) massResolveEventContext(wants []eventTuple, beforeLimit, afterLimit int) (resp []*RespContext, err error) {
+	resp = make([]*RespContext, 0, len(wants))
+	for _, want := range wants {
+		ctx, err := cli.resolveEventContext(want.roomID, want.eventID, beforeLimit, afterLimit)
+		if err != nil {
+			// TODO ignore history-perms
+			return nil, err
+		}
+		resp = append(resp, ctx)
+	}
+	return
+}
+
+func (cli *WrappedClient) massResolveEvent(wants []eventTuple) (resp []*gomatrix.Event, err error) {
+	resp = make([]*gomatrix.Event, 0, len(wants))
+	for _, want := range wants {
+		ev, err := cli.resolveEvent(want.roomID, want.eventID)
+		if err != nil {
+			// TODO ignore history-perms
+			return nil, err
+		}
+		resp = append(resp, ev)
+	}
 	return
 }
 
