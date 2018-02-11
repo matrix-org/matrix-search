@@ -344,6 +344,10 @@ const MAX_SEARCH_RUNS = 3
 func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, searchTerm string, from, limit int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total uint64, res search.DocumentMatchCollection, err error) {
 
+	if roomEvMap == nil {
+		roomEvMap = make(map[string]*Result)
+	}
+
 	// set page size to double their limit
 	// iterate minimum number of pages : minimum
 	// iterate minimum + constant      : maximum
@@ -374,6 +378,8 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			tuples = append(tuples, eventTuple{roomID, eventID})
 		}
 
+		ttt := make([]SearchResultProcessor, 0, len(resp.Hits))
+
 		if context != nil { // wantsContext
 			// TODO we should only be doing this calculation once, maybe at UNMARSH?
 			beforeLimit := 5
@@ -392,78 +398,42 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 				return
 			}
 
-			// TODO make generic using interfaces
 			for _, ctx := range ctxs {
-				// If event does not match out filter we cannot return it, so it does not count towards the limit.
-				// TODO this is really suboptimal as we can't do it at index-query time...
-				if !filter.filterEv(ctx.Event) {
-					continue
-				}
-
-				gluedID := glueRoomEventIDs(ctx.Event)
-				hit := hitMap[gluedID]
-				result := Result{
-					Rank:   hit.Score,
-					Result: ctx.Event,
-					Context: &EventContext{
-						Start:        ctx.Start,
-						End:          ctx.End,
-						EventsBefore: ctx.EventsBefore,
-						EventsAfter:  ctx.EventsAfter,
-					},
-				}
-
-				if context.IncludeProfile {
-					result.Context.ProfileInfo = make(map[string]*UserProfile)
-					for _, ev := range ctx.State {
-						// if is StateEvent and of Type m.room.member
-						if ev.StateKey != nil && ev.Type == "m.room.member" {
-							userProfile := UserProfile{}
-
-							if str, ok := ev.Content["displayname"].(string); ok {
-								userProfile.DisplayName = str
-							}
-							if str, ok := ev.Content["avatar_url"].(string); ok {
-								userProfile.AvatarURL = str
-							}
-
-							result.Context.ProfileInfo[*ev.StateKey] = &userProfile
-						}
-					}
-				}
-
-				roomEvMap[gluedID] = &result
-				res = append(res, hit)
-				numGotten++
+				ttt = append(ttt, SearchResultProcessor(ctx))
 			}
 		} else {
-			var evs []*gomatrix.Event
+			var evs []*WrappedEvent
 			evs, err = cli.massResolveEvent(tuples)
 			if err != nil {
 				return
 			}
 
-			// TODO make generic using interfaces
 			for _, ev := range evs {
-				// If event does not match out filter we cannot return it, so it does not count towards the limit.
-				// TODO this is really suboptimal as we can't do it at index-query time...
-				if !filter.filterEv(ev) {
-					continue
-				}
-
-				if roomEvMap == nil {
-					roomEvMap = make(map[string]*Result)
-				}
-
-				gluedID := glueRoomEventIDs(ev)
-				hit := hitMap[gluedID]
-				roomEvMap[gluedID] = &Result{
-					Rank:   hit.Score,
-					Result: ev,
-				}
-				res = append(res, hit)
-				numGotten++
+				ttt = append(ttt, SearchResultProcessor(ev))
 			}
+		}
+
+		for _, t := range ttt {
+			// If we have reached our target within our search runs, break out of the loop
+			if numGotten >= limit {
+				break
+			}
+
+			ev := t.getEv()
+
+			// If event does not match out filter we cannot return it, so it does not count towards the limit.
+			// TODO this is really suboptimal as we can't do it at index-query time...
+			if !filter.filterEv(ev) {
+				continue
+			}
+
+			gluedID := glueRoomEventIDs(ev)
+			hit := hitMap[gluedID]
+
+			result := t.build(gluedID, context.IncludeProfile)
+			result.Rank = hit.Score
+			res = append(res, hit)
+			numGotten++
 		}
 
 		/*
