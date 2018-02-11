@@ -434,88 +434,6 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			res = append(res, hit)
 			numGotten++
 		}
-
-		/*
-			// This could be paralleled as its used to make a map which is not the source of truth for order.
-			for _, hit := range resp.Hits {
-				// If we have reached our target within our search runs, break out of the loop
-				if numGotten >= limit {
-					break
-				}
-
-				roomID, eventID := splitRoomEventIDs(hit.ID)
-
-				result := Result{
-					Rank: hit.Score,
-				}
-
-				if context != nil { // wantsContext
-					beforeLimit := 5
-					afterLimit := 5
-
-					if context.BeforeLimit != nil {
-						beforeLimit = *context.BeforeLimit
-					}
-					if context.AfterLimit != nil {
-						afterLimit = *context.AfterLimit
-					}
-
-					var ctx *RespContext
-					ctx, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
-					if err != nil {
-						// TODO error handling for history permissions
-						continue
-					}
-
-					// If event does not match out filter we cannot return it, so it does not count towards the limit.
-					// TODO this is really suboptimal as we can't do it at index-query time...
-					if !filter.filterEv(ctx.Event) {
-						continue
-					}
-
-					result.Result = ctx.Event
-					result.Context = &EventContext{
-						Start:        ctx.Start,
-						End:          ctx.End,
-						EventsBefore: ctx.EventsBefore,
-						EventsAfter:  ctx.EventsAfter,
-					}
-
-					if context.IncludeProfile {
-						result.Context.ProfileInfo = make(map[string]*UserProfile)
-						for _, ev := range ctx.State {
-							// if is StateEvent and of Type m.room.member
-							if ev.StateKey != nil && ev.Type == "m.room.member" {
-								userProfile := UserProfile{}
-
-								if str, ok := ev.Content["displayname"].(string); ok {
-									userProfile.DisplayName = str
-								}
-								if str, ok := ev.Content["avatar_url"].(string); ok {
-									userProfile.AvatarURL = str
-								}
-
-								result.Context.ProfileInfo[*ev.StateKey] = &userProfile
-							}
-						}
-					}
-				} else {
-					var ev *gomatrix.Event
-					ev, err = cli.resolveEvent(roomID, eventID)
-					if err != nil {
-						// TODO error handling for history permissions
-						continue
-					}
-
-					// If event does not match out filter we cannot return it, so it does not count towards the limit.
-					// TODO this is really suboptimal as we can't do it at index-query time...
-					if !filter.filterEv(ev) {
-						continue
-					}
-
-					result.Result = ev
-				}
-			}*/
 	}
 
 	// for sanity truncate
@@ -610,6 +528,8 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	var allowedEvents search.DocumentMatchCollection
 	var eventMap map[string]map[string]*Result
 
+	var rooms common.StringSet
+
 	switch orderBy {
 	case "rank":
 		eventMap, total, allowedEvents, err := searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, 0, searchFilter.Limit, eventContext)
@@ -656,6 +576,8 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 				senderGroup[ev.Sender] = makeSearchGroup(res.Rank)
 			}
 			senderGroup[ev.Sender].addResult(ev.ID)
+
+			rooms.AddString(ev.RoomID)
 		}
 
 	case "recent":
@@ -668,7 +590,33 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		}
 	}
 
-	// TODO rest of processing
+	// TODO bunch of stuff
+
+	roomStateMap := map[string][]*gomatrix.Event{}
+	if includeState {
+		// fetch state from server using API.
+		for roomID := range rooms {
+			var stateEvs []*gomatrix.Event
+			stateEvs, err = cli.latestState(roomID)
+			if err != nil {
+				return
+			}
+			roomStateMap[roomID] = stateEvs
+		}
+	}
+
+	resp = Results{
+		Categories{
+			RoomEventResults{
+				Count:   count,
+				Results: results,
+				State:   roomStateMap,
+				//Groups:,
+				//NextBatch:,
+			},
+		},
+	}
+	return
 }
 
 type SearchGroup struct {
