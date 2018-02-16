@@ -77,6 +77,13 @@ func (fp *FilterPart) UnmarshalJSON(b []byte) error {
 	*fp = FilterPart{
 		Limit:       limit,
 		ContainsURL: filter.ContainsURL,
+
+		Rooms:      common.StringSet{},
+		NotRooms:   common.StringSet{},
+		Senders:    common.StringSet{},
+		NotSenders: common.StringSet{},
+		Types:      common.StringSet{},
+		NotTypes:   common.StringSet{},
 	}
 
 	if len(filter.Rooms) > 0 {
@@ -195,7 +202,7 @@ func (b *batch) isValid() bool {
 }
 
 func (b *batch) isGrouping(str string) bool {
-	return b.Group != nil && *b.Group == str
+	return b != nil && b.Group != nil && *b.Group == str
 }
 
 func newBatch(str string) (b *batch, err error) {

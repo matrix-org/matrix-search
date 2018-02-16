@@ -7,7 +7,6 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/fatih/set"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
@@ -30,7 +29,7 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 	return nil
 }
 
-func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
+func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
 	qr := bleve.NewBooleanQuery()
 
 	// Must satisfy room_id
@@ -69,6 +68,17 @@ func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs c
 
 	sr := bleve.NewSearchRequestOptions(qr, size, from, false)
 	sr.IncludeLocations = true
+
+	if orderBy == "recent" {
+		//req.SortBy([]string{"-time"})
+		sr.SortByCustom(search.SortOrder{
+			&search.SortField{
+				Field: "time",
+				Desc:  true,
+			},
+		})
+	}
+	resp, err = idxr.Query(sr)
 	return
 }
 
@@ -84,7 +94,7 @@ func glueRoomEventIDs(ev *WrappedEvent) string {
 const MAX_SEARCH_RUNS = 3
 
 // TODO sortBy
-func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, searchTerm string, from, limit int, context *RequestEventContext) (
+func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from, limit int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
@@ -109,7 +119,7 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 		}
 
 		var resp *bleve.SearchResult
-		resp, err = search1(idxr, keys, filter, roomIDs, searchTerm, from+(i*pageSize), pageSize)
+		resp, err = search1(idxr, keys, filter, roomIDs, orderBy, searchTerm, from+(i*pageSize), pageSize)
 		if err != nil {
 			return
 		}
@@ -184,7 +194,7 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 	}
 
 	// for sanity truncate
-	res = res[:limit]
+	//res = res[:limit]
 	return
 }
 
@@ -296,7 +306,7 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 
 	switch orderBy {
 	case "rank":
-		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, 0, searchFilter.Limit, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "rank", searchTerm, 0, searchFilter.Limit, eventContext)
 		if err != nil {
 			return
 		}
@@ -347,12 +357,17 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		return
 	}
 
-	// This is done at the search time
-	//if eventContext != nil {
-	//	if eventContext.IncludeProfile {
-	// only put ProfileInfo in for eventMap that are given
-	//}
-	//}
+	if len(allowedEvents) < 1 {
+		resp = &Results{
+			Categories{
+				RoomEventResults{
+					Results: []*Result{},
+					Count:   0,
+				},
+			},
+		}
+		return
+	}
 
 	// TODO bunch of stuff
 
@@ -421,188 +436,194 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 		return
 	}
 
-	joinedRooms, err := cli.joinedRooms()
-	if err != nil {
-		return
-	}
+	var results *Results
+	results, err = h(cli, &idxr, &sr, b)
 
-	joinedRoomIDsSet := set.NewNonTS()
-	for i := range joinedRooms.JoinedRooms {
-		joinedRoomIDsSet.Add(joinedRooms.JoinedRooms[i])
-	}
-
-	q := sr.SearchCategories.RoomEvents
-
-	//groupKeys := []string
-	fmt.Println(q.Groupings)
-
-	wantedRoomIDsSet := set.NewNonTS()
-	for i := range q.Filter.Rooms {
-		wantedRoomIDsSet.Add(q.Filter.Rooms[i])
-	}
-
-	roomIDsSet := set.Intersection(joinedRoomIDsSet, wantedRoomIDsSet)
-
-	for i := range q.Filter.NotRooms {
-		roomIDsSet.Remove(q.Filter.NotRooms[i])
-	}
-
-	qr := bleve.NewBooleanQuery()
-
-	// Must satisfy room_id
-	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(common.NewStringSet(set.StringSlice(roomIDsSet)), "room_id")))
-
-	// Must satisfy sender
-	mustSenders := generateQueryList(q.Filter.Senders, "sender")
-	if len(mustSenders) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustSenders))
-	}
-
-	// Must satisfy not sender
-	qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
-
-	// Must satisfy type
-	mustType := generateQueryList(q.Filter.Types, "type")
-	if len(mustType) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustType))
-	}
-
-	// Must satisfy not type
-	qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
-
-	// The user-entered query string
-	if len(q.Keys) > 0 {
-		oneOf := query.NewDisjunctionQuery(nil)
-		for _, key := range q.Keys {
-			qrs := query.NewMatchQuery(strings.ToLower(q.SearchTerm))
-			qrs.SetField(key)
-			oneOf.AddQuery(qrs)
-		}
-		qr.AddMust(oneOf)
-	} else {
-		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
-	}
-
-	limit := q.Filter.Limit
-
-	//req := bleve.NewSearchRequest(qr)
-	// TODO from=pagination
-	req := bleve.NewSearchRequestOptions(qr, limit, 0, false)
-
-	// TODO be less naive on rank/recent check
-	if q.OrderBy == "recent" {
-		//req.SortBy([]string{"-time"})
-		req.SortByCustom(search.SortOrder{
-			&search.SortField{
-				Field: "time",
-				Desc:  true,
-			},
-		})
-	}
-	res, err := idxr.Query(req)
-
-	if err != nil {
-		return
-	}
-
-	results := make([]*Result, 0, len(res.Hits))
-	rooms := map[string]struct{}{}
-
-	// START
-	wantsContext := q.EventContext != nil
-
-	beforeLimit := 5
-	afterLimit := 5
-	includeProfile := q.EventContext.IncludeProfile
-
-	if q.EventContext.BeforeLimit != nil {
-		beforeLimit = *q.EventContext.BeforeLimit
-	}
-	if q.EventContext.AfterLimit != nil {
-		afterLimit = *q.EventContext.AfterLimit
-	}
-	//END
-
-	for _, hit := range res.Hits {
-
-		result := Result{
-			Rank: hit.Score,
+	/*
+		joinedRooms, err := cli.joinedRooms()
+		if err != nil {
+			return
 		}
 
-		segs := strings.SplitN(hit.ID, "/", 2)
-		roomID := segs[0]
-		eventID := segs[1]
+		joinedRoomIDsSet := set.NewNonTS()
+		for i := range joinedRooms.JoinedRooms {
+			joinedRoomIDsSet.Add(joinedRooms.JoinedRooms[i])
+		}
 
-		if wantsContext {
-			var context *RespContext
-			context, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
-			if err != nil {
-				return
+		q := sr.SearchCategories.RoomEvents
+
+		//groupKeys := []string
+		fmt.Println(q.Groupings)
+
+		wantedRoomIDsSet := set.NewNonTS()
+		for i := range q.Filter.Rooms {
+			wantedRoomIDsSet.Add(q.Filter.Rooms[i])
+		}
+
+		roomIDsSet := set.Intersection(joinedRoomIDsSet, wantedRoomIDsSet)
+
+		for i := range q.Filter.NotRooms {
+			roomIDsSet.Remove(q.Filter.NotRooms[i])
+		}
+
+		qr := bleve.NewBooleanQuery()
+
+		// Must satisfy room_id
+		qr.AddMust(query.NewDisjunctionQuery(generateQueryList(common.NewStringSet(set.StringSlice(roomIDsSet)), "room_id")))
+
+		// Must satisfy sender
+		mustSenders := generateQueryList(q.Filter.Senders, "sender")
+		if len(mustSenders) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustSenders))
+		}
+
+		// Must satisfy not sender
+		qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
+
+		// Must satisfy type
+		mustType := generateQueryList(q.Filter.Types, "type")
+		if len(mustType) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustType))
+		}
+
+		// Must satisfy not type
+		qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
+
+		// The user-entered query string
+		if len(q.Keys) > 0 {
+			oneOf := query.NewDisjunctionQuery(nil)
+			for _, key := range q.Keys {
+				qrs := query.NewMatchQuery(strings.ToLower(q.SearchTerm))
+				qrs.SetField(key)
+				oneOf.AddQuery(qrs)
+			}
+			qr.AddMust(oneOf)
+		} else {
+			qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
+		}
+
+		limit := q.Filter.Limit
+
+		//req := bleve.NewSearchRequest(qr)
+		// TODO from=pagination
+		req := bleve.NewSearchRequestOptions(qr, limit, 0, false)
+
+		// TODO be less naive on rank/recent check
+		if q.OrderBy == "recent" {
+			//req.SortBy([]string{"-time"})
+			req.SortByCustom(search.SortOrder{
+				&search.SortField{
+					Field: "time",
+					Desc:  true,
+				},
+			})
+		}
+		res, err := idxr.Query(req)
+
+		if err != nil {
+			return
+		}
+
+		results := make([]*Result, 0, len(res.Hits))
+		rooms := map[string]struct{}{}
+
+		// START
+		wantsContext := q.EventContext != nil
+
+		beforeLimit := 5
+		afterLimit := 5
+		includeProfile := q.EventContext.IncludeProfile
+
+		if q.EventContext.BeforeLimit != nil {
+			beforeLimit = *q.EventContext.BeforeLimit
+		}
+		if q.EventContext.AfterLimit != nil {
+			afterLimit = *q.EventContext.AfterLimit
+		}
+		//END
+
+		for _, hit := range res.Hits {
+
+			result := Result{
+				Rank: hit.Score,
 			}
 
-			result.Result = context.Event
-			result.Context = &EventContext{
-				Start:        context.Start,
-				End:          context.End,
-				EventsBefore: context.EventsBefore,
-				EventsAfter:  context.EventsAfter,
-			}
+			segs := strings.SplitN(hit.ID, "/", 2)
+			roomID := segs[0]
+			eventID := segs[1]
 
-			if includeProfile {
-				result.Context.ProfileInfo = make(map[string]*UserProfile)
-				for _, ev := range context.State {
-					if ev.Type == "m.room.member" {
-						userProfile := UserProfile{}
+			if wantsContext {
+				var context *RespContext
+				context, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
+				if err != nil {
+					return
+				}
 
-						if str, ok := ev.Content["displayname"].(string); ok {
-							userProfile.DisplayName = str
+				result.Result = context.Event
+				result.Context = &EventContext{
+					Start:        context.Start,
+					End:          context.End,
+					EventsBefore: context.EventsBefore,
+					EventsAfter:  context.EventsAfter,
+				}
+
+				if includeProfile {
+					result.Context.ProfileInfo = make(map[string]*UserProfile)
+					for _, ev := range context.State {
+						if ev.Type == "m.room.member" {
+							userProfile := UserProfile{}
+
+							if str, ok := ev.Content["displayname"].(string); ok {
+								userProfile.DisplayName = str
+							}
+							if str, ok := ev.Content["avatar_url"].(string); ok {
+								userProfile.AvatarURL = str
+							}
+
+							result.Context.ProfileInfo[*ev.StateKey] = &userProfile
 						}
-						if str, ok := ev.Content["avatar_url"].(string); ok {
-							userProfile.AvatarURL = str
-						}
-
-						result.Context.ProfileInfo[*ev.StateKey] = &userProfile
 					}
 				}
+			} else {
+				var ev *WrappedEvent
+				ev, err = cli.resolveEvent(roomID, eventID)
+				if err != nil {
+					return
+				}
+				result.Result = ev
 			}
-		} else {
-			var ev *WrappedEvent
-			ev, err = cli.resolveEvent(roomID, eventID)
-			if err != nil {
-				return
-			}
-			result.Result = ev
+
+			results = append(results, &result)
+			rooms[result.Result.RoomID] = struct{}{}
 		}
 
-		results = append(results, &result)
-		rooms[result.Result.RoomID] = struct{}{}
-	}
-
-	roomStateMap := map[string][]*gomatrix.Event{}
-	if q.IncludeState {
-		// fetch state from server using API.
-		for roomID := range rooms {
-			var stateEvs []*gomatrix.Event
-			stateEvs, err = cli.latestState(roomID)
-			if err != nil {
-				return
+		roomStateMap := map[string][]*gomatrix.Event{}
+		if q.IncludeState {
+			// fetch state from server using API.
+			for roomID := range rooms {
+				var stateEvs []*gomatrix.Event
+				stateEvs, err = cli.latestState(roomID)
+				if err != nil {
+					return
+				}
+				roomStateMap[roomID] = stateEvs
 			}
-			roomStateMap[roomID] = stateEvs
 		}
-	}
 
-	resp = Results{
-		Categories{
-			RoomEventResults{
-				Count:   int(res.Total),
-				Results: results,
-				State:   roomStateMap,
-				//Groups:,
-				//NextBatch:,
+		resp = Results{
+			Categories{
+				RoomEventResults{
+					Count:   int(res.Total),
+					Results: results,
+					State:   roomStateMap,
+					//Groups:,
+					//NextBatch:,
+				},
 			},
-		},
-	}
-	return
+		}
+	*/
+
+	return results, err
 }
 
 func getToken(r *http.Request) (string, bool) {
