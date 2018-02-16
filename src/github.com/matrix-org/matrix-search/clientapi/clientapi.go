@@ -17,240 +17,6 @@ import (
 	"strings"
 )
 
-type GroupValue struct {
-	NextBatch *string  `json:"next_batch,omitempty"`
-	Order     int      `json:"order,omitempty"`
-	Results   []string `json:"results,omitempty"`
-}
-
-type UserProfile struct {
-	DisplayName string `json:"displayname,omitempty"`
-	AvatarURL   string `json:"avatar_url,omitempty"`
-}
-
-type EventContext struct {
-	Start        string                  `json:"start,omitempty"`
-	End          string                  `json:"end,omitempty"`
-	ProfileInfo  map[string]*UserProfile `json:"profile_info,omitempty"`
-	EventsBefore []*gomatrix.Event       `json:"events_before,omitempty"`
-	EventsAfter  []*gomatrix.Event       `json:"events_after,omitempty"`
-}
-
-type ResultSet struct {
-}
-
-type Result struct {
-	Rank    float64       `json:"rank"`
-	Result  *WrappedEvent `json:"result"`
-	Context *EventContext `json:"context,omitempty"`
-}
-
-//type ContextMap map[string]map[string]*EventContext
-//func (cm ContextMap) getContext(roomID, eventID string) *EventContext {
-//	if _, exists := cm[roomID]; exists {
-//		return cm[roomID][eventID]
-//	}
-//	return nil
-//}
-
-type RoomEventResults struct {
-	Count     int                              `json:"count"`
-	Results   []Result                         `json:"results"`
-	State     map[string][]*gomatrix.Event     `json:"state,omitempty"`
-	Groups    map[string]map[string]GroupValue `json:"groups,omitempty"`
-	NextBatch *string                          `json:"next_batch,omitempty"`
-}
-
-type Categories struct {
-	RoomEvents RoomEventResults `json:"room_events"`
-}
-
-type Results struct {
-	SearchCategories Categories `json:"search_categories"`
-}
-
-type RequestGroup struct {
-	Key string `json:"key"` // room_id/sender
-}
-
-type RequestGroupings struct {
-	GroupBy []RequestGroup `json:"group_by"`
-}
-
-type RequestEventContext struct {
-	BeforeLimit    *int `json:"before_limit"`
-	AfterLimit     *int `json:"after_limit"`
-	IncludeProfile bool `json:"include_profile"`
-}
-
-type RequestGroups struct {
-	//Groupings []RequestGroups
-	roomID bool
-	sender bool
-}
-
-func (rg *RequestGroups) UnmarshalJSON(b []byte) error {
-	var groupings RequestGroupings
-	err := json.Unmarshal(b, &groupings)
-	if err != nil {
-		return err
-	}
-
-	*rg = RequestGroups{}
-
-	for _, v := range groupings.GroupBy {
-		switch v.Key {
-		case "room_id":
-			rg.roomID = true
-		case "sender":
-			rg.sender = true
-		default:
-			return errors.New("invalid group by keys")
-		}
-	}
-	return nil
-}
-
-type FilterPart struct {
-	Rooms       common.StringSet
-	NotRooms    common.StringSet
-	Senders     common.StringSet
-	NotSenders  common.StringSet
-	Types       common.StringSet
-	NotTypes    common.StringSet
-	Limit       int
-	ContainsURL *bool
-	//gomatrix.FilterPart
-}
-
-func (fp *FilterPart) UnmarshalJSON(b []byte) error {
-	var filter gomatrix.FilterPart
-	err := json.Unmarshal(b, &filter)
-	if err != nil {
-		return err
-	}
-
-	// Limit (default=10)
-	limit := 10
-	if filter.Limit != nil {
-		limit = *filter.Limit
-	}
-
-	*fp = FilterPart{
-		Limit:       limit,
-		ContainsURL: filter.ContainsURL,
-	}
-
-	if len(filter.Rooms) > 0 {
-		fp.Rooms.AddStrings(filter.Rooms)
-	}
-	if len(filter.NotRooms) > 0 {
-		fp.NotRooms.AddStrings(filter.NotRooms)
-	}
-
-	if len(filter.Senders) > 0 {
-		fp.Senders.AddStrings(filter.Senders)
-	}
-	if len(filter.NotSenders) > 0 {
-		fp.NotSenders.AddStrings(filter.NotSenders)
-	}
-
-	if len(filter.Types) > 0 {
-		fp.Types.AddStrings(filter.Types)
-	}
-	if len(filter.NotTypes) > 0 {
-		fp.NotTypes.AddStrings(filter.NotTypes)
-	}
-
-	return nil
-}
-
-func (fp *FilterPart) filterRooms(roomIDs []string) common.StringSet {
-	ss := common.NewStringSet(roomIDs)
-	if !fp.NotRooms.IsEmpty() {
-		ss.Remove(fp.NotRooms)
-	}
-
-	if !fp.Rooms.IsEmpty() {
-		ss.Intersect(fp.Rooms)
-	}
-
-	return ss
-}
-
-func (fp *FilterPart) checkField(field string, allowed, disallowed common.StringSet) bool {
-	if disallowed.Has(field) {
-		return false
-	}
-	if !allowed.IsEmpty() && !allowed.Has(field) {
-		return false
-	}
-	return true
-}
-
-func (fp *FilterPart) checkFields(roomID, sender, evType string, isURL bool) bool {
-	if !fp.checkField(roomID, fp.Rooms, fp.NotRooms) {
-		return false
-	}
-	if !fp.checkField(sender, fp.Senders, fp.NotSenders) {
-		return false
-	}
-	if !fp.checkField(evType, fp.Types, fp.NotTypes) {
-		return false
-	}
-
-	if fp.ContainsURL != nil {
-		if *fp.ContainsURL != isURL {
-			return false
-		}
-	}
-	return true
-}
-
-func (fp *FilterPart) filterEv(ev *WrappedEvent) bool {
-	sender := ev.Sender
-	roomID := ev.RoomID
-	evType := ev.Type
-	_, isURL := ev.Content["url"]
-	return fp.checkFields(roomID, sender, evType, isURL)
-}
-
-func (fp *FilterPart) filter(events []*Result) []*Result {
-	// destructive filter, writes over original array.
-	filtered := events[:0]
-	for _, e := range events {
-		// TODO handle Presence events
-		if fp.filterEv(e.Result) {
-			filtered = append(filtered, e)
-		}
-	}
-
-	return filtered
-}
-
-//type rankedEvent struct {
-//	rank float64
-//	*gomatrix.Event
-//}
-
-type RequestRoomEvents struct {
-	SearchTerm   string               `json:"search_term"`
-	Keys         []string             `json:"keys"`
-	Filter       FilterPart           `json:"filter"`
-	OrderBy      string               `json:"order_by"`
-	EventContext *RequestEventContext `json:"event_context"`
-	IncludeState bool                 `json:"include_state"`
-	Groupings    RequestGroups        `json:"groupings"` // TODO
-}
-
-type RequestCategories struct {
-	RoomEvents RequestRoomEvents `json:"room_events"`
-}
-
-type SearchRequest struct {
-	SearchCategories RequestCategories `json:"search_categories"`
-}
-
 func generateQueryList(filterSet common.StringSet, fieldName string) []query.Query {
 	if size := len(filterSet); size > 0 {
 		queries := make([]query.Query, 0, size)
@@ -262,28 +28,6 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 		return queries
 	}
 	return nil
-}
-
-type batch struct {
-	Group    *string `json:"group"`
-	GroupKey *string `json:"group_key"`
-	Token    *string `json:"token"`
-}
-
-func (b *batch) isValid() bool {
-	return b.Group != nil && b.GroupKey != nil && b.Token != nil
-}
-
-func (b *batch) isGrouping(str string) bool {
-	return b.Group != nil && *b.Group == str
-}
-
-func newBatch(str string) (b *batch, err error) {
-	err = json.Unmarshal([]byte(str), &b)
-	if err == nil && (b.Group == nil || b.GroupKey == nil || b.Token == nil) {
-		err = errors.New("invalid batch")
-	}
-	return
 }
 
 func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
@@ -341,7 +85,7 @@ const MAX_SEARCH_RUNS = 3
 
 // TODO sortBy
 func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, searchTerm string, from, limit int, context *RequestEventContext) (
-	roomEvMap map[string]*Result, total uint64, res search.DocumentMatchCollection, err error) {
+	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
 		roomEvMap = make(map[string]*Result)
@@ -364,10 +108,13 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			break
 		}
 
-		resp, err := search1(idxr, keys, filter, roomIDs, searchTerm, from+(i*pageSize), pageSize)
+		var resp *bleve.SearchResult
+		resp, err = search1(idxr, keys, filter, roomIDs, searchTerm, from+(i*pageSize), pageSize)
 		if err != nil {
 			return
 		}
+
+		total = int(resp.Total)
 
 		tuples := make([]eventTuple, 0, len(resp.Hits))
 		hitMap := map[string]*search.DocumentMatch{}
@@ -441,7 +188,23 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 	return
 }
 
-func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) (resp interface{}, err error) {
+type HTTPError struct {
+	Message string
+	Code    int
+}
+
+func (err *HTTPError) Error() string {
+	return fmt.Sprintf("[%d] %s", err.Code, err.Message)
+}
+
+func getHTTPError(code int) *HTTPError {
+	return &HTTPError{
+		Message: http.StatusText(code),
+		Code:    code,
+	}
+}
+
+func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) (resp *Results, err error) {
 	roomCat := sr.SearchCategories.RoomEvents
 
 	// The actual thing to query in FTS
@@ -497,11 +260,11 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	}
 
 	if len(roomIDs) < 1 {
-		resp = Results{
+		resp = &Results{
 			Categories{
 				RoomEventResults{
 					//Highlight:
-					Results: []Result{},
+					Results: []*Result{},
 					Count:   0,
 				},
 			},
@@ -513,31 +276,30 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	//rankMap := map[string]float64{}
 	//allowedEvents := []*Result{}
 	// TODO these need changing
-	roomGroups := map[string]SearchGroup{}
-	senderGroup := map[string]SearchGroup{}
+	roomGroups := map[string]GroupValue{}
+	senderGroups := map[string]GroupValue{}
 
 	// Holds the next_batch for the engine result set if one of those exists
 	// TODO
-	globalNextBatch := string(nil)
+	var globalNextBatch *string
 
-	highlights := common.StringSet{}
+	// TODO HIGHLIGHTS
+	//highlights := common.StringSet{}
 
 	// TODO
-	count := int(nil)
+	var count int
 
 	var allowedEvents search.DocumentMatchCollection
-	var eventMap map[string]map[string]*Result
+	var eventMap map[string]*Result
 
 	var rooms common.StringSet
 
 	switch orderBy {
 	case "rank":
-		eventMap, total, allowedEvents, err := searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, 0, searchFilter.Limit, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, searchTerm, 0, searchFilter.Limit, eventContext)
 		if err != nil {
 			return
 		}
-
-		count = int(total)
 
 		// so we have a bunch of {rank,eventId} tuples
 		// we need to look them up with Synapse using the Context API,
@@ -548,8 +310,6 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		//if len(searchResult.Highlights) > 0 {
 		//	highlights.AddStrings(searchResult.Highlights)
 		//}
-
-		//searchResult.
 
 		// getting event and filtering must be interleaved otherwise our pages will be too short
 
@@ -563,32 +323,36 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		//allowedEvents = eventMap[:searchFilter.Limit]
 
 		for _, e := range allowedEvents {
-			//roomID, eventID := splitRoomEventIDs(e.ID)
 			res := eventMap[e.ID]
 			ev := res.Result
 
 			if _, ok := roomGroups[ev.RoomID]; !ok {
-				roomGroups[ev.RoomID] = makeSearchGroup(res.Rank)
+				roomGroups[ev.RoomID] = makeGroupValue(res.Rank)
 			}
 			roomGroups[ev.RoomID].addResult(ev.ID)
 
-			if _, ok := senderGroup[ev.Sender]; !ok {
-				senderGroup[ev.Sender] = makeSearchGroup(res.Rank)
+			if _, ok := senderGroups[ev.Sender]; !ok {
+				senderGroups[ev.Sender] = makeGroupValue(res.Rank)
 			}
-			senderGroup[ev.Sender].addResult(ev.ID)
+			senderGroups[ev.Sender].addResult(ev.ID)
 
 			rooms.AddString(ev.RoomID)
 		}
 
 	case "recent":
-
+		// TODO recent
+		fallthrough
+	default:
+		err = getHTTPError(http.StatusNotImplemented)
+		return
 	}
 
-	if eventContext != nil {
-		if eventContext.IncludeProfile {
-			// only put ProfileInfo in for eventMap that are given
-		}
-	}
+	// This is done at the search time
+	//if eventContext != nil {
+	//	if eventContext.IncludeProfile {
+	// only put ProfileInfo in for eventMap that are given
+	//}
+	//}
 
 	// TODO bunch of stuff
 
@@ -605,34 +369,38 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		}
 	}
 
-	resp = Results{
+	results := make([]*Result, 0, len(allowedEvents))
+	for _, hit := range allowedEvents {
+		results = append(results, eventMap[hit.ID])
+	}
+
+	resp = &Results{
 		Categories{
 			RoomEventResults{
-				Count:   count,
-				Results: results,
-				State:   roomStateMap,
-				//Groups:,
-				//NextBatch:,
+				Count:     count,
+				Results:   results,
+				State:     roomStateMap,
+				NextBatch: globalNextBatch,
 			},
 		},
 	}
-	return
-}
 
-type SearchGroup struct {
-	Results []string
-	Order   float64
-}
+	// If groupByRoomID/groupBySender attach Groups field in response.
+	if groupByRoomID {
+		if resp.SearchCategories.RoomEvents.Groups == nil {
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]GroupValue{}
+		}
+		resp.SearchCategories.RoomEvents.Groups["room_id"] = roomGroups
 
-func (sg *SearchGroup) addResult(res string) {
-	sg.Results = append(sg.Results, res)
-}
-
-func makeSearchGroup(order float64) SearchGroup {
-	return SearchGroup{
-		Results: []string{},
-		Order:   order,
 	}
+	if groupBySender {
+		if resp.SearchCategories.RoomEvents.Groups == nil {
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]GroupValue{}
+		}
+		resp.SearchCategories.RoomEvents.Groups["sender"] = senderGroups
+
+	}
+	return
 }
 
 func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *batch) (resp interface{}, err error) {
@@ -737,7 +505,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 		return
 	}
 
-	results := make([]Result, 0, len(res.Hits))
+	results := make([]*Result, 0, len(res.Hits))
 	rooms := map[string]struct{}{}
 
 	// START
@@ -806,7 +574,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 			result.Result = ev
 		}
 
-		results = append(results, result)
+		results = append(results, &result)
 		rooms[result.Result.RoomID] = struct{}{}
 	}
 

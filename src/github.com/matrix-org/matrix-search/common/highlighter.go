@@ -2,9 +2,7 @@ package common
 
 import (
 	"container/heap"
-	"fmt"
 
-	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/document"
 	"github.com/blevesearch/bleve/registry"
 	"github.com/blevesearch/bleve/search"
