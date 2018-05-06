@@ -23,8 +23,28 @@ var bindPtr = flag.String("bind", "127.0.0.1:9999", "The host:port to bind to")
 var configPathPtr = flag.String("config", "config.yaml", "The path to the matrix-search config YAML")
 var PprofEnabledPtr = flag.Bool("pprof", false, "Whether or not to enable Pprof debugging")
 
+var parsed = false
+
+func parse() {
+	if !parsed {
+		flag.Parse()
+		parsed = true
+	}
+}
+
+func LoadConfig() (conf *config.Config) {
+	parse()
+
+	var err error
+	if conf, err = config.LoadConfig(*configPathPtr); err != nil {
+		fmt.Printf("Unable to load config file: %v\n", err)
+		os.Exit(-1)
+	}
+	return
+}
+
 func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
-	flag.Parse()
+	parse()
 
 	var err error
 

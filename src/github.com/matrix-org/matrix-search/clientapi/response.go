@@ -8,15 +8,20 @@ type GroupValue struct {
 	Results   []string `json:"results,omitempty"`
 }
 
-func (sg GroupValue) addResult(res string) {
+func (sg *GroupValue) addResult(res string) {
 	sg.Results = append(sg.Results, res)
 }
 
-func makeGroupValue(order float64) GroupValue {
-	return GroupValue{
-		Results: []string{},
-		Order:   order,
+type GroupValueMap map[string]*GroupValue
+
+func (gvm GroupValueMap) add(key, id string, order float64) {
+	if _, ok := gvm[key]; !ok {
+		gvm[key] = &GroupValue{
+			Results: []string{},
+			Order:   order,
+		}
 	}
+	gvm[key].addResult(id)
 }
 
 type UserProfile struct {
@@ -42,11 +47,12 @@ type Result struct {
 }
 
 type RoomEventResults struct {
-	Count     int                              `json:"count"`
-	Results   []*Result                        `json:"results"`
-	State     map[string][]*gomatrix.Event     `json:"state,omitempty"`
-	Groups    map[string]map[string]GroupValue `json:"groups,omitempty"`
-	NextBatch *string                          `json:"next_batch,omitempty"`
+	Count      int                               `json:"count"`
+	Results    []*Result                         `json:"results"`
+	State      map[string][]*gomatrix.Event      `json:"state,omitempty"`
+	Groups     map[string]map[string]*GroupValue `json:"groups,omitempty"`
+	NextBatch  *string                           `json:"next_batch,omitempty"`
+	Highlights []string                          `json:"highlights"`
 }
 
 type Categories struct {

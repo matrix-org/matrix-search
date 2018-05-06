@@ -10,9 +10,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
+	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -94,7 +96,7 @@ func glueRoomEventIDs(ev *WrappedEvent) string {
 const MAX_SEARCH_RUNS = 3
 
 // TODO sortBy
-func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from, limit int, context *RequestEventContext) (
+func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
@@ -108,13 +110,17 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 
 	// from is an int of events not pages
 
-	pageSize := limit * 2
+	pageSize := filter.Limit * 2
+	//offset := 0
+
+	beforeLimit := context.BeforeLimit()
+	afterLimit := context.AfterLimit()
 
 	numGotten := 0
-	res = make(search.DocumentMatchCollection, 0, limit)
+	res = make(search.DocumentMatchCollection, 0, filter.Limit)
 	for i := 0; i < MAX_SEARCH_RUNS; i++ {
 		// If we have reached our target within our search runs, break out of the loop
-		if numGotten >= limit {
+		if numGotten >= filter.Limit {
 			break
 		}
 
@@ -125,8 +131,9 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 		}
 
 		total = int(resp.Total)
+		numHits := len(resp.Hits)
 
-		tuples := make([]eventTuple, 0, len(resp.Hits))
+		tuples := make([]eventTuple, 0, numHits)
 		hitMap := map[string]*search.DocumentMatch{}
 		for _, hit := range resp.Hits {
 			hitMap[hit.ID] = hit
@@ -134,20 +141,9 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			tuples = append(tuples, eventTuple{roomID, eventID})
 		}
 
-		ttt := make([]SearchResultProcessor, 0, len(resp.Hits))
+		ttt := make([]RespEvGeneric, 0, numHits)
 
 		if context != nil { // wantsContext
-			// TODO we should only be doing this calculation once, maybe at UNMARSH?
-			beforeLimit := 5
-			afterLimit := 5
-
-			if context.BeforeLimit != nil {
-				beforeLimit = *context.BeforeLimit
-			}
-			if context.AfterLimit != nil {
-				afterLimit = *context.AfterLimit
-			}
-
 			var ctxs []*RespContext
 			ctxs, err = cli.massResolveEventContext(tuples, beforeLimit, afterLimit)
 			if err != nil {
@@ -155,7 +151,8 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			}
 
 			for _, ctx := range ctxs {
-				ttt = append(ttt, SearchResultProcessor(ctx))
+				context := Context{ctx.Start, ctx.End, ctx.EventsBefore, ctx.EventsAfter, ctx.State}
+				ttt = append(ttt, RespEvGeneric{ctx.Event, &context})
 			}
 		} else {
 			var evs []*WrappedEvent
@@ -165,29 +162,29 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 			}
 
 			for _, ev := range evs {
-				ttt = append(ttt, SearchResultProcessor(ev))
+				ttt = append(ttt, RespEvGeneric{ev, nil})
 			}
 		}
 
 		for _, t := range ttt {
 			// If we have reached our target within our search runs, break out of the loop
-			if numGotten >= limit {
+			if numGotten >= filter.Limit {
 				break
 			}
 
-			ev := t.getEv()
-
 			// If event does not match out filter we cannot return it, so it does not count towards the limit.
 			// TODO this is really suboptimal as we can't do it at index-query time...
-			if !filter.filterEv(ev) {
+			if !filter.filterEv(t.Event) {
 				continue
 			}
 
-			gluedID := glueRoomEventIDs(ev)
+			gluedID := glueRoomEventIDs(t.Event)
 			hit := hitMap[gluedID]
 
-			result := t.build(gluedID, context.IncludeProfile)
+			result := t.build(context.IncludeProfile)
 			result.Rank = hit.Score
+			roomEvMap[hit.ID] = result
+
 			res = append(res, hit)
 			numGotten++
 		}
@@ -226,19 +223,6 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		keys = roomCat.Keys
 	}
 
-	// What to order results by (impacts whether pagination can be done) {rank,recent}
-	var orderBy string
-	switch roomCat.OrderBy {
-	case "recent":
-		orderBy = "recent"
-	case "rank":
-		fallthrough
-	case "":
-		orderBy = "rank"
-	default:
-		// TODO error
-	}
-
 	// Return the current state of the rooms?
 	includeState := roomCat.IncludeState
 
@@ -273,9 +257,10 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		resp = &Results{
 			Categories{
 				RoomEventResults{
-					//Highlight:
-					Results: []*Result{},
-					Count:   0,
+					// TODO this is a stub \/
+					Highlights: []string{},
+					Results:    []*Result{},
+					Count:      0,
 				},
 			},
 		}
@@ -286,8 +271,8 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	//rankMap := map[string]float64{}
 	//allowedEvents := []*Result{}
 	// TODO these need changing
-	roomGroups := map[string]GroupValue{}
-	senderGroups := map[string]GroupValue{}
+	roomGroups := GroupValueMap{}
+	senderGroups := GroupValueMap{}
 
 	// Holds the next_batch for the engine result set if one of those exists
 	// TODO
@@ -302,11 +287,12 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	var allowedEvents search.DocumentMatchCollection
 	var eventMap map[string]*Result
 
-	var rooms common.StringSet
+	rooms := common.StringSet{}
 
-	switch orderBy {
+	switch roomCat.OrderBy {
 	case "rank":
-		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "rank", searchTerm, 0, searchFilter.Limit, eventContext)
+	case "":
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "rank", searchTerm, 0, eventContext)
 		if err != nil {
 			return
 		}
@@ -332,26 +318,38 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		// Truncate
 		//allowedEvents = eventMap[:searchFilter.Limit]
 
-		for _, e := range allowedEvents {
-			res := eventMap[e.ID]
-			ev := res.Result
-
-			if _, ok := roomGroups[ev.RoomID]; !ok {
-				roomGroups[ev.RoomID] = makeGroupValue(res.Rank)
+	case "recent":
+		from := 0
+		if b.HasToken() {
+			if num, err := strconv.Atoi(*b.Token); err == nil {
+				from = num
 			}
-			roomGroups[ev.RoomID].addResult(ev.ID)
-
-			if _, ok := senderGroups[ev.Sender]; !ok {
-				senderGroups[ev.Sender] = makeGroupValue(res.Rank)
-			}
-			senderGroups[ev.Sender].addResult(ev.ID)
-
-			rooms.AddString(ev.RoomID)
 		}
 
-	case "recent":
-		// TODO recent
-		fallthrough
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "recent", searchTerm, from, eventContext)
+
+		if len(allowedEvents) >= searchFilter.Limit {
+			// TODO fix this as HitNumber does not work for this purpose :(
+			offset := allowedEvents[len(allowedEvents)-1].HitNumber
+			offsetStr := strconv.Itoa(int(offset))
+
+			if b.isValid() {
+				if t, err := newBatch(*b.Group, *b.GroupKey, offsetStr); err == nil {
+					globalNextBatch = &t
+				}
+			} else {
+				if t, err := newBatch("all", "", offsetStr); err == nil {
+					globalNextBatch = &t
+				}
+			}
+
+			for roomID, group := range roomGroups {
+				if t, err := newBatch("room_id", roomID, offsetStr); err == nil {
+					group.NextBatch = &t
+				}
+			}
+		}
+
 	default:
 		err = getHTTPError(http.StatusNotImplemented)
 		return
@@ -361,15 +359,44 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 		resp = &Results{
 			Categories{
 				RoomEventResults{
-					Results: []*Result{},
-					Count:   0,
+					Highlights: []string{},
+					Results:    []*Result{},
+					Count:      0,
 				},
 			},
 		}
 		return
 	}
 
+	for _, e := range allowedEvents {
+		res := eventMap[e.ID]
+		ev := res.Result
+
+		if groupByRoomID {
+			roomGroups.add(ev.RoomID, ev.ID, res.Rank)
+		}
+
+		if groupBySender {
+			senderGroups.add(ev.Sender, ev.ID, res.Rank)
+		}
+
+		rooms.AddString(ev.RoomID)
+	}
+
+	// TODO can we do this better than O(n * 3 * m) [O(n^3)]
+	highlights := common.StringSet{}
+	for _, hit := range allowedEvents {
+		for _, key := range keys {
+			if matches, ok := hit.Locations[key]; ok {
+				for match := range matches {
+					highlights.AddString(match)
+				}
+			}
+		}
+	}
+
 	// TODO bunch of stuff
+	// TODO highlights
 
 	roomStateMap := map[string][]*gomatrix.Event{}
 	if includeState {
@@ -392,10 +419,11 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	resp = &Results{
 		Categories{
 			RoomEventResults{
-				Count:     count,
-				Results:   results,
-				State:     roomStateMap,
-				NextBatch: globalNextBatch,
+				Count:      count,
+				Results:    results,
+				State:      roomStateMap,
+				NextBatch:  globalNextBatch,
+				Highlights: highlights.ToArray(),
 			},
 		},
 	}
@@ -403,14 +431,14 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	// If groupByRoomID/groupBySender attach Groups field in response.
 	if groupByRoomID {
 		if resp.SearchCategories.RoomEvents.Groups == nil {
-			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]GroupValue{}
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]*GroupValue{}
 		}
 		resp.SearchCategories.RoomEvents.Groups["room_id"] = roomGroups
 
 	}
 	if groupBySender {
 		if resp.SearchCategories.RoomEvents.Groups == nil {
-			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]GroupValue{}
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]*GroupValue{}
 		}
 		resp.SearchCategories.RoomEvents.Groups["sender"] = senderGroups
 
@@ -641,10 +669,45 @@ func getToken(r *http.Request) (string, bool) {
 
 func getBatch(r *http.Request) (b *batch, err error) {
 	if batchStr, ok := r.URL.Query()["next_batch"]; ok && len(batchStr) == 1 {
-		b, err = newBatch(batchStr[0])
+		b, err = readBatch(batchStr[0])
 		return
 	}
 	return
+}
+
+func RegisterLocalHandler(router *mux.Router, idxr indexing.Indexer, conf *config.Config) {
+	router.HandleFunc("/clientapi/search", func(w http.ResponseWriter, r *http.Request) {
+		b, err := getBatch(r)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		resp, err := handler(r.Body, idxr, conf.Homeserver.URL, conf.LocalDaemon.AccessToken, b)
+
+		if err != nil {
+			if e, ok := err.(gomatrix.HTTPError); ok {
+				wrapped := e.WrappedError
+				fmt.Println(e, wrapped)
+				// http.Error...
+				// return
+			}
+			fmt.Println(err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		//hits, err := json.Marshal(events)
+		hits, err := json.Marshal(resp)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(hits)
+	})
 }
 
 func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
@@ -681,6 +744,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
 			return
 		}
 
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(hits)
 	})

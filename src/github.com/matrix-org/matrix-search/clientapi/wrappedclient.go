@@ -34,13 +34,26 @@ func (cli *WrappedClient) latestState(roomID string) (resp []*gomatrix.Event, er
 	return
 }
 
+type Context struct {
+	Start        string
+	End          string
+	EventsBefore []*gomatrix.Event
+	EventsAfter  []*gomatrix.Event
+	State        []*WrappedEvent
+}
+
+type RespEvGeneric struct {
+	Event   *WrappedEvent
+	Context *Context
+}
+
 type RespContext struct {
 	Start        string            `json:"start"`
 	End          string            `json:"end"`
 	EventsBefore []*gomatrix.Event `json:"events_before"`
 	Event        *WrappedEvent     `json:"event"`
 	EventsAfter  []*gomatrix.Event `json:"events_after"`
-	State        []*gomatrix.Event `json:"state"`
+	State        []*WrappedEvent   `json:"state"`
 }
 
 func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
@@ -54,7 +67,7 @@ func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimi
 	})
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 
-	if err != nil {
+	if err == nil {
 		resp.EventsAfter = resp.EventsAfter[:afterLimit]
 		resp.EventsBefore = resp.EventsBefore[:beforeLimit]
 	}
@@ -63,6 +76,10 @@ func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimi
 }
 
 type WrappedEvent gomatrix.Event
+
+func (ev *WrappedEvent) IsStateEvent() bool {
+	return ev.StateKey != nil
+}
 
 func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *WrappedEvent, err error) {
 	cli.Lock()
@@ -104,8 +121,8 @@ func (cli *WrappedClient) massResolveEvent(wants []eventTuple) (resp []*WrappedE
 	return
 }
 
-func NewWrappedASClient(userID, hsURL, localpart, token string) (wp *WrappedClient, err error) {
-	cli, err := common.MakeClient(hsURL, localpart, token)
+func NewWrappedASClient(userID, hsURL, ASUserID, token string) (wp *WrappedClient, err error) {
+	cli, err := common.MakeClient(hsURL, ASUserID, token)
 	if err != nil {
 		return
 	}
@@ -113,8 +130,8 @@ func NewWrappedASClient(userID, hsURL, localpart, token string) (wp *WrappedClie
 	return &WrappedClient{Client: cli}, nil
 }
 
-func NewWrappedClient(hsURL, localpart, token string) (wp *WrappedClient, err error) {
-	cli, err := common.MakeClient(hsURL, localpart, token)
+func NewWrappedClient(hsURL, userID, token string) (wp *WrappedClient, err error) {
+	cli, err := common.MakeClient(hsURL, userID, token)
 	if err != nil {
 		return
 	}
@@ -126,19 +143,28 @@ type SearchResultProcessor interface {
 	getEv() *WrappedEvent
 }
 
-func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
-	result = &Result{
-		Result: ctx.Event,
-		Context: &EventContext{
-			Start:        ctx.Start,
-			End:          ctx.End,
-			EventsBefore: ctx.EventsBefore,
-			EventsAfter:  ctx.EventsAfter,
-		},
+type options struct {
+	Context        *RespContext
+	IncludeProfile bool
+}
+
+func (reg *RespEvGeneric) build(includeProfile bool) (r *Result) {
+	r.Result = reg.Event
+
+	ctx := reg.Context
+	if ctx == nil {
+		return
+	}
+
+	r.Context = &EventContext{
+		Start:        ctx.Start,
+		End:          ctx.End,
+		EventsBefore: ctx.EventsBefore,
+		EventsAfter:  ctx.EventsAfter,
 	}
 
 	if includeProfile {
-		var senders common.StringSet
+		senders := common.StringSet{}
 
 		for _, ev := range ctx.EventsBefore {
 			senders.AddString(ev.Sender)
@@ -146,12 +172,12 @@ func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
 		for _, ev := range ctx.EventsAfter {
 			senders.AddString(ev.Sender)
 		}
-		senders.AddString(ctx.Event.Sender)
+		senders.AddString(reg.Event.Sender)
 
-		result.Context.ProfileInfo = make(map[string]*UserProfile)
+		r.Context.ProfileInfo = make(map[string]*UserProfile)
 		for _, ev := range ctx.State {
-			// if is StateEvent and of Type m.room.member and StateKey(Sender) is in this Context
-			if ev.StateKey != nil && ev.Type == "m.room.member" && senders.Has(*ev.StateKey) {
+			// if stateEvent with type "m.room.member" and sender thereof is in this context
+			if ev.IsStateEvent() && ev.Type == "m.room.member" && senders.Has(*ev.StateKey) {
 				userProfile := UserProfile{}
 
 				if str, ok := ev.Content["displayname"].(string); ok {
@@ -161,24 +187,10 @@ func (ctx *RespContext) build(id string, includeProfile bool) (result *Result) {
 					userProfile.AvatarURL = str
 				}
 
-				result.Context.ProfileInfo[*ev.StateKey] = &userProfile
+				r.Context.ProfileInfo[*ev.StateKey] = &userProfile
 			}
 		}
 	}
 
 	return
-}
-
-func (ctx *RespContext) getEv() *WrappedEvent {
-	return ctx.Event
-}
-
-func (ev *WrappedEvent) build(id string, includeProfile bool) (result *Result) {
-	return &Result{
-		Result: ev,
-	}
-}
-
-func (ev *WrappedEvent) getEv() *WrappedEvent {
-	return ev
 }

@@ -11,6 +11,11 @@ type Config struct {
 		Domain string `yaml:"domain"`
 	} `yaml:"homeserver"`
 
+	LocalDaemon struct {
+		UserID      string `yaml:"user_id"`
+		AccessToken string `yaml:"access_token"`
+	} `yaml:"local_daemon"`
+
 	Search struct {
 		ModeAppservice bool `yaml:"mode_appservice"`
 		Stemming       struct {

@@ -19,6 +19,7 @@ import (
 	"github.com/blevesearch/bleve/mapping"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/blevesearch/blevex/detectlang"
+	"github.com/matrix-org/gomatrix"
 	"log"
 	"os"
 	"strings"
@@ -31,7 +32,7 @@ type Indexer struct {
 	sync.RWMutex
 }
 
-func (i *Indexer) getIndex(id string) (idx bleve.Index) {
+func (i *Indexer) GetIndex(id string) (idx bleve.Index) {
 	id = "all"
 
 	i.RLock()
@@ -57,12 +58,20 @@ func (i *Indexer) getIndex(id string) (idx bleve.Index) {
 	return
 }
 
-func (i *Indexer) AddEvent(ID, RoomID string, ev Event) bool {
-	if err := ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.getIndex(RoomID)); err != nil {
-		fmt.Println(err)
-		return false
+func (i *Indexer) IndexEvent(ev *gomatrix.Event) {
+	if ev.Type != "m.room.message" {
+		return
 	}
-	return true
+
+	ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
+	iev := NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
+	// TODO handle err from AddEvent and bail txn processing
+	err := i.AddEvent(ev.ID, ev.RoomID, iev)
+	fmt.Println(err)
+}
+
+func (i *Indexer) AddEvent(ID, RoomID string, ev Event) error {
+	return ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.GetIndex(RoomID))
 }
 
 func makeSearchQuery(query string) query.Query {
@@ -70,17 +79,17 @@ func makeSearchQuery(query string) query.Query {
 }
 
 func (i *Indexer) Query(sr *bleve.SearchRequest) (*bleve.SearchResult, error) {
-	ix := i.getIndex("")
+	ix := i.GetIndex("")
 	return ix.Search(sr)
 }
 
 //func (i *Indexer) QueryMultiple(roomIds []string, qs string) (*bleve.SearchResult, error) {
 //	//targetedIdxs := make([]bleve.Index, len(roomIds))
 //	//for j, roomId := range roomIds {
-//	//	targetedIdxs[j] = i.getIndex(roomId)
+//	//	targetedIdxs[j] = i.GetIndex(roomId)
 //	//}
 //	//collection := bleve.NewIndexAlias(targetedIdxs...)
-//	collection := i.getIndex("")
+//	collection := i.GetIndex("")
 //	request := makeSearchQuery(qs)
 //
 //	roomIdQueries := make([]query.Query, 0, len(roomIds))
@@ -155,8 +164,7 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 	if index == nil {
 		return errors.New("missing index")
 	}
-	err := index.Index(ID, ev)
-	return err
+	return index.Index(ID, ev)
 }
 
 func NewEvent(sender, roomID, evType string, content map[string]interface{}, time time.Time) Event {

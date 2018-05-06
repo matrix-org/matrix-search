@@ -1,6 +1,7 @@
 package clientapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/matrix-org/gomatrix"
@@ -16,9 +17,23 @@ type requestGroupings struct {
 }
 
 type RequestEventContext struct {
-	BeforeLimit    *int `json:"before_limit"`
-	AfterLimit     *int `json:"after_limit"`
+	beforeLimit    *int `json:"before_limit"`
+	afterLimit     *int `json:"after_limit"`
 	IncludeProfile bool `json:"include_profile"`
+}
+
+func (rec *RequestEventContext) BeforeLimit() int {
+	if rec.beforeLimit != nil {
+		return *rec.beforeLimit
+	}
+	return 5
+}
+
+func (rec *RequestEventContext) AfterLimit() int {
+	if rec.afterLimit != nil {
+		return *rec.afterLimit
+	}
+	return 5
 }
 
 type RequestGroups struct {
@@ -180,7 +195,7 @@ type RequestRoomEvents struct {
 	OrderBy      string               `json:"order_by"`
 	EventContext *RequestEventContext `json:"event_context"`
 	IncludeState bool                 `json:"include_state"`
-	Groupings    RequestGroups        `json:"groupings"` // TODO
+	Groupings    RequestGroups        `json:"groupings"`
 }
 
 type RequestCategories struct {
@@ -192,23 +207,42 @@ type SearchRequest struct {
 }
 
 type batch struct {
-	Group    *string `json:"group"`
-	GroupKey *string `json:"group_key"`
-	Token    *string `json:"token"`
+	Group    *string `json:"group,omitempty"`
+	GroupKey *string `json:"group_key,omitempty"`
+	Token    *string `json:"token,omitempty"`
+}
+
+func (b *batch) HasToken() bool {
+	return b != nil && b.Token != nil
 }
 
 func (b *batch) isValid() bool {
-	return b.Group != nil && b.GroupKey != nil && b.Token != nil
+	return b != nil && b.Group != nil && b.GroupKey != nil
 }
 
 func (b *batch) isGrouping(str string) bool {
 	return b != nil && b.Group != nil && *b.Group == str
 }
 
-func newBatch(str string) (b *batch, err error) {
-	err = json.Unmarshal([]byte(str), &b)
+func readBatch(str string) (b *batch, err error) {
+	dec, err := base64.URLEncoding.DecodeString(str)
+	if err != nil {
+		return
+	}
+
+	err = json.Unmarshal(dec, &b)
 	if err == nil && (b.Group == nil || b.GroupKey == nil || b.Token == nil) {
 		err = errors.New("invalid batch")
+		return
 	}
 	return
+}
+
+func newBatch(group, key, token string) (string, error) {
+	b, err := json.Marshal(&batch{&group, &key, &token})
+	if err != nil {
+		return "", err
+	}
+
+	return base64.URLEncoding.EncodeToString(b), nil
 }

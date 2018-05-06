@@ -1,2 +1,7 @@
 homeserver:
-  url: "https://localhost:8448/"
+  url: "https://matrix.org"
+#  url: "https://localhost:8448/"
+
+local_daemon:
+  user_id: "@webdevguru:matrix.org"
+  access_token: "***REMOVED***"
