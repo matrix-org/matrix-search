@@ -207,13 +207,12 @@ enum QueryType {
 class Query {
     fieldName: string;
     type: QueryType;
-    values: Set<string>;
-
+    values: Array<string>;
 
     constructor(fieldName: string, type: QueryType, values: Set<string>) {
         this.fieldName = fieldName;
         this.type = type;
-        this.values = values;
+        this.values = Array.from(values);
     }
 }
 
@@ -234,6 +233,17 @@ class BleveRequest {
         this.from = from;
         this.size = size;
     }
+}
+
+interface BleveResponseEvent {
+    eventId: string;
+    rank: number;
+}
+
+interface BleveResponse {
+    highlights: Array<string>;
+    events: Array<BleveResponseEvent>;
+    nextFrom: number;
 }
 
 const pageSize = 10;
@@ -461,8 +471,6 @@ async function setup() {
                     res.sendStatus(501);
                     return;
             }
-
-
 
             if (allowedEvents.length < 1) {
                 res.json({

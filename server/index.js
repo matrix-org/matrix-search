@@ -151,7 +151,7 @@ class Query {
     constructor(fieldName, type, values) {
         this.fieldName = fieldName;
         this.type = type;
-        this.values = values;
+        this.values = Array.from(values);
     }
 }
 class BleveRequest {
