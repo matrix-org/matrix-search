@@ -17,8 +17,8 @@ import {
     WebStorageSessionStore,
     setCryptoStoreFactory,
     IndexedDBCryptoStore,
-    LocalStorageCryptoStore,
 } from 'matrix-js-sdk';
+const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 // import StubStore from 'matrix-js-sdk/src/store/stub.js';
 
 // import * as LevelStore from './level-store';
@@ -106,28 +106,22 @@ function intersect(a: Set<string>, b: Set<string>): Set<string> {
 }
 
 class Filter {
-    rooms: Set<string> | undefined;
-    notRooms: Set<string> | undefined;
-    senders: Set<string> | undefined;
-    notSenders: Set<string> | undefined;
-    types: Set<string> | undefined;
-    notTypes: Set<string> | undefined;
+    rooms: Set<string>;
+    notRooms: Set<string>;
+    senders: Set<string>;
+    notSenders: Set<string>;
+    types: Set<string>;
+    notTypes: Set<string>;
     limit: number;
     containsURL: boolean | undefined;
 
     constructor(o: object) {
-        if ('rooms' in o)
-            this.rooms = new Set<string>(o['rooms']);
-        if ('not_rooms' in o)
-            this.notRooms = new Set<string>(o['not_rooms']);
-        if ('senders' in o)
-            this.senders = new Set<string>(o['senders']);
-        if ('not_senders' in o)
-            this.notSenders = new Set<string>(o['not_senders']);
-        if ('types' in o)
-            this.types = new Set<string>(o['types']);
-        if ('not_types' in o)
-            this.notTypes = new Set<string>(o['not_types']);
+        this.rooms = new Set<string>(o['rooms']);
+        this.notRooms = new Set<string>(o['not_rooms']);
+        this.senders = new Set<string>(o['senders']);
+        this.notSenders = new Set<string>(o['not_senders']);
+        this.types = new Set<string>(o['types']);
+        this.notTypes = new Set<string>(o['not_types']);
 
         this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
         this.containsURL = o['contains_url'];
@@ -177,7 +171,7 @@ class Batch {
     public Group: string;
     public GroupKey: string;
 
-    constructor(Token: number, Group: string, GroupKey: string) {
+    constructor(Token: number = 0, Group: string, GroupKey: string) {
         this.Token = Token;
         this.Group = Group;
         this.GroupKey = GroupKey;
@@ -192,6 +186,10 @@ class Batch {
         }
     }
 
+    from() {
+        return this.Token;
+    }
+
     toString() {
         return JSON.stringify({
             Token: this.Token,
@@ -201,6 +199,45 @@ class Batch {
     }
 }
 
+enum QueryType {
+    Must = 'must',
+    MustNot = 'mustnot',
+}
+
+class Query {
+    fieldName: string;
+    type: QueryType;
+    values: Set<string>;
+
+
+    constructor(fieldName: string, type: QueryType, values: Set<string>) {
+        this.fieldName = fieldName;
+        this.type = type;
+        this.values = values;
+    }
+}
+
+class BleveRequest {
+    keys: Array<string>;
+    filter: Array<Query>;
+    sortBy: string;
+    searchTerm: string;
+    from: number;
+    size: number;
+
+
+    constructor(keys: Array<string>, filter: Array<Query>, orderBy: string, searchTerm: string, from: number, size: number) {
+        this.keys = keys;
+        this.filter = filter;
+        this.sortBy = orderBy;
+        this.searchTerm = searchTerm;
+        this.from = from;
+        this.size = size;
+    }
+}
+
+const pageSize = 10;
+
 class Search {
     cli: MatrixClient;
 
@@ -208,8 +245,37 @@ class Search {
         this.cli = cli;
     }
 
+    // keys: pass straight through to go-bleve
+    // searchFilter: compute and send search rules to go-bleve
+    // roomIDsSet: used with above /\
+    // sortBy: pass straight through to go-bleve
+    // searchTerm: pass straight through to go-bleve
+    // from: pass straight through to go-bleve
+    // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
     Query(keys: Array<string>, searchFilter: Filter, roomIDsSet: Set<string>, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean) {
+        const queries: Array<Query> = [];
 
+        // must satisfy room_id
+        queries.push(new Query('room_id', QueryType.Must, roomIDsSet));
+
+        // must satisfy sender
+        if (searchFilter.senders.size > 0)
+            queries.push(new Query('sender', QueryType.Must, searchFilter.senders));
+        // must satisfy !sender
+        if (searchFilter.notSenders.size > 0)
+            queries.push(new Query('sender', QueryType.MustNot, searchFilter.notSenders));
+
+        // must satisfy type
+        if (searchFilter.types.size > 0)
+            queries.push(new Query('type', QueryType.Must, searchFilter.types));
+        // must satisfy !type
+        if (searchFilter.notTypes.size > 0)
+            queries.push(new Query('type', QueryType.MustNot, searchFilter.notTypes));
+
+        const r = new BleveRequest(keys, queries, orderBy, searchTerm, from, pageSize);
+        console.log(JSON.stringify(r));
+
+        this.cli.addListener('', () => {});
     }
 }
 
@@ -282,10 +348,7 @@ async function setup() {
     cli.startClient();
 
     const app = express();
-
     app.use(bodyParser.json());
-
-
     app.use(cors({
         'allowedHeaders': ['access_token', 'Content-Type'],
         'exposedHeaders': ['access_token'],
@@ -295,7 +358,12 @@ async function setup() {
     }));
 
     app.post('/search', (req: Request, res: Response) => {
-        let nextBatch;
+        if (!req.body) {
+            res.sendStatus(400);
+            return;
+        }
+
+        let nextBatch: Batch | null = null;
         if (req.query['next_batch']) {
             const decoded = global.atob(req.query['next_batch']);
             try {
@@ -336,7 +404,7 @@ async function setup() {
             const searchFilter = new Filter(roomCat.filter);
 
             const joinedRooms = cli.getRooms();
-            const roomIds = joinedRooms.map((room: Room) => room.room_id);
+            const roomIds = joinedRooms.map((room: Room) => room.roomId);
 
             if (roomIds.length < 1) {
                 res.json({
@@ -376,7 +444,7 @@ async function setup() {
             const searchTerm = roomCat['search_term'];
 
             // TODO extend local event map using sqlite/leveldb
-            switch (roomCat['orderBy']) {
+            switch (roomCat['order_by']) {
                 case 'rank':
                 case '':
                     // get messages from Bleve by rank // resolve them locally
@@ -384,8 +452,9 @@ async function setup() {
                     break;
 
                 case 'recent':
+                    const from = nextBatch !== null ? nextBatch.from() : 0;
+                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Recent, searchTerm, from, eventContext);
                     // TODO get next back here
-                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Recent, searchTerm, nextBatch.from(), eventContext);
                     break;
 
                 default:

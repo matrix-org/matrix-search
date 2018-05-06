@@ -341,7 +341,7 @@ declare namespace Matrix.Models {
     /!* models/room.js *!/
     */
     export class Room {
-        room_id: string;
+        roomId: string;
     }
     /*
 
