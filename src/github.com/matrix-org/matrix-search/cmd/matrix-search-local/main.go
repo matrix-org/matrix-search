@@ -20,6 +20,21 @@ func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Category: %v\n", vars["category"])
 }
 
+type QueryFilter struct {
+	FieldName string   `json:"field_name"`
+	Type      string   `json:"type"`
+	Values    []string `json:"values"`
+}
+
+type QueryRequest struct {
+	Keys       []string      `json:"keys"`
+	Filter     []QueryFilter `json:"filter"`
+	SortBy     string        `json:"sortBy"`
+	SearchTerm string        `json:"searchTerm"`
+	From       int           `json:"from"`
+	Size       int           `json:"size"`
+}
+
 func main() {
 	conf := common.LoadConfig()
 	if conf == nil {
@@ -68,7 +83,14 @@ func main() {
 	}).Methods("PUT")
 
 	router.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
+		var req QueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			fmt.Println(err)
+			return
+		}
 
+		// here we have a valid search request
+		fmt.Println(req)
 	}).Methods("POST")
 
 	// add the API
