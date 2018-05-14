@@ -2,23 +2,20 @@ package main
 
 import (
 	bleveHttp "github.com/blevesearch/bleve/http"
-	// "github.com/matrix-org/matrix-search/clientapi"
 	"encoding/json"
 	"fmt"
+	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/search"
+	"github.com/blevesearch/bleve/search/query"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
-
-func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Category: %v\n", vars["category"])
-}
 
 type QueryFilter struct {
 	FieldName string   `json:"field_name"`
@@ -33,6 +30,80 @@ type QueryRequest struct {
 	SearchTerm string        `json:"searchTerm"`
 	From       int           `json:"from"`
 	Size       int           `json:"size"`
+}
+
+func (req *QueryRequest) Valid() bool {
+	if req.SortBy != "rank" && req.SortBy != "recent" {
+		return false
+	}
+
+	for _, q := range req.Filter {
+		if q.Type != "must" && q.Type != "mustnot" {
+			return false
+		}
+	}
+
+	return true
+}
+
+func generateQueryList(filterSet common.StringSet, fieldName string) []query.Query {
+	if size := len(filterSet); size > 0 {
+		queries := make([]query.Query, 0, size)
+		for k := range filterSet {
+			qr := query.NewTermQuery(k)
+			qr.SetField(fieldName)
+			queries = append(queries, qr)
+		}
+		return queries
+	}
+	return nil
+}
+
+func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
+	qr := bleve.NewBooleanQuery()
+
+	for _, q := range req.Filter {
+		if len(q.Values) < 1 {
+			continue
+		}
+
+		vs := common.NewStringSet(q.Values)
+
+		switch q.Type {
+		case "mustNot":
+			qr.AddMustNot(generateQueryList(vs, q.FieldName)...)
+		case "must":
+			qr.AddMust(query.NewDisjunctionQuery(generateQueryList(vs, q.FieldName)))
+		}
+	}
+
+	// The user-entered query string
+	if len(req.Keys) > 0 {
+		oneOf := query.NewDisjunctionQuery(nil)
+		for _, key := range req.Keys {
+			qrs := query.NewMatchQuery(strings.ToLower(req.SearchTerm))
+			qrs.SetField(key)
+			oneOf.AddQuery(qrs)
+		}
+		qr.AddMust(oneOf)
+	} else {
+		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(req.SearchTerm)))
+	}
+
+	sr := bleve.NewSearchRequestOptions(qr, req.Size, req.From, false)
+	sr.IncludeLocations = true
+
+	if req.SortBy == "recent" {
+		//req.SortBy([]string{"-time"})
+		sr.SortByCustom(search.SortOrder{
+			&search.SortField{
+				Field: "time",
+				Desc:  true,
+			},
+		})
+	}
+
+	return sr
 }
 
 func main() {
@@ -89,8 +160,16 @@ func main() {
 			return
 		}
 
-		// here we have a valid search request
-		fmt.Println(req)
+		if valid := req.Valid(); !valid {
+			fmt.Println("Query Request invalid", req)
+			return
+		}
+
+		sr := req.generateSearchRequest()
+		resp, err := idxr.Query(sr)
+
+		fmt.Println(resp, err)
+
 	}).Methods("POST")
 
 	// add the API
