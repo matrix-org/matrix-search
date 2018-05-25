@@ -546,7 +546,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 				},
 			})
 		}
-		res, err := idxr.Query(req)
+		res, err := idxr.query(req)
 
 		if err != nil {
 			return

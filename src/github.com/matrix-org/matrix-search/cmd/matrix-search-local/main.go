@@ -1,7 +1,6 @@
 package main
 
 import (
-	bleveHttp "github.com/blevesearch/bleve/http"
 	"encoding/json"
 	"fmt"
 	"github.com/blevesearch/bleve"
@@ -18,7 +17,7 @@ import (
 )
 
 type QueryFilter struct {
-	FieldName string   `json:"field_name"`
+	FieldName string   `json:"fieldName"`
 	Type      string   `json:"type"`
 	Values    []string `json:"values"`
 }
@@ -161,7 +160,7 @@ func main() {
 		}
 
 		if valid := req.Valid(); !valid {
-			fmt.Println("Query Request invalid", req)
+			fmt.Println("query Request invalid", req)
 			return
 		}
 
@@ -171,16 +170,6 @@ func main() {
 		fmt.Println(resp, err)
 
 	}).Methods("POST")
-
-	// add the API
-	bleveHttp.RegisterIndexName("search", index)
-	// indexHandler := bleveHttp.NewDocIndexHandler("search")
-	// indexHandler.DocIDLookup = docIDLookup
-	// router.Handle("/api/index/{docID}", indexHandler).Methods("PUT")
-	searchHandler := bleveHttp.NewSearchHandler("search")
-	router.Handle("/api/search", searchHandler).Methods("POST")
-	listFieldsHandler := bleveHttp.NewListFieldsHandler("search")
-	router.Handle("/api/fields", listFieldsHandler).Methods("GET")
 
 	fmt.Println("Starting LS")
 

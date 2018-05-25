@@ -56,7 +56,7 @@ function selectQuery(store, keyRange, resultMapper) {
     return new Promise((resolve, reject) => {
         const results = [];
         query.onerror = (event) => {
-            reject(new Error("Query failed: " + event.target.errorCode));
+            reject(new Error("query failed: " + event.target.errorCode));
         };
         // collect results
         query.onsuccess = (event) => {

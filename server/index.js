@@ -11,48 +11,59 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const cors_1 = __importDefault(require("cors"));
-global.Olm = require('olm');
-const matrix_js_sdk_1 = require("matrix-js-sdk");
+const express_1 = __importDefault(require("express"));
+const body_parser_1 = __importDefault(require("body-parser"));
+const mkdirp = __importStar(require("mkdirp"));
+const matrix_js_sdk_1 = require("./typings/matrix-js-sdk");
+const sqlite3_1 = __importDefault(require("sqlite3"));
+const indexeddbjs = require('indexeddb-js');
+const Queue = require('better-queue');
+const SqliteStore = require('better-queue-sqlite');
+const request = require('request-promise');
+// process.on('unhandledRejection', (reason, p) => {
+//     console.log("Unhandled at : Promise", p, "reason:", reason);
+// console.log(reason.stack);
+// });
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 // import StubStore from 'matrix-js-sdk/src/store/stub.js';
 // import * as LevelStore from './level-store';
 // import * as Promise from 'bluebird';
+// create directory which will house the 3 stores.
+mkdirp.sync('./store');
 // Loading localStorage module
-if (typeof global.localStorage === "undefined" || global.localStorage === null) {
-    global.localStorage = new (require('node-localstorage').LocalStorage)('./store');
-}
-const sqlite3 = require('sqlite3');
-const indexeddbjs = require('indexeddb-js');
-const request = __importStar(require("request-promise"));
-// const request = require('request-promise');
-const Queue = require('better-queue');
-const engine = new sqlite3.Database('./store.sqlite');
+if (typeof global.localStorage === "undefined" || global.localStorage === null)
+    global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
+global.Olm = require('olm');
+const matrix_js_sdk_2 = require("matrix-js-sdk");
+const utils = require('matrix-js-sdk/src/utils');
+const engine = new sqlite3_1.default.Database('./store/indexedb.sqlite');
 const scope = indexeddbjs.makeScope('sqlite3', engine);
 const indexedDB = scope.indexedDB;
 if (indexedDB) {
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(indexedDB, 'matrix-js-sdk:crypto'));
-    matrix_js_sdk_1.setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
+    matrix_js_sdk_2.setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(null));
 }
-const express_1 = __importDefault(require("express"));
-const body_parser_1 = __importDefault(require("body-parser"));
 class BleveHttp {
     constructor(baseUrl) {
         this.request = request.defaults({
             baseUrl,
         });
     }
-    async search() {
+    search(req) {
+        return this.request({
+            url: 'query',
+            method: 'POST',
+            json: true,
+            body: req,
+        });
     }
-    async index(events) {
-        return await this.request({
+    index(events) {
+        return this.request({
             url: 'index',
             method: 'PUT',
             json: true,
             body: events.map(ev => ev.event),
-        }).then(resp => {
-            // if resp is not successful return a failure
-            return Promise.reject('');
         });
     }
 }
@@ -63,18 +74,16 @@ const q = new Queue((batch, cb) => {
     batchSize: 100,
     maxRetries: 10,
     retryDelay: 1000,
-    store: {
-        type: 'sql',
-        dialect: 'sqlite',
-        path: './queue'
-    },
+    store: new SqliteStore({
+        path: './store/queue',
+    }),
     filter: (event, cb) => {
         if (event.getType() !== 'm.room.message')
             return cb(null, event);
         return cb('not m.room.message');
     }
 });
-setup().then().catch();
+setup().then(console.log).catch(console.error);
 function intersect(a, b) {
     return new Set([...a].filter(x => b.has(x)));
 }
@@ -165,9 +174,55 @@ class BleveRequest {
     }
 }
 const pageSize = 10;
+matrix_js_sdk_1.MatrixClient.prototype.fetchEvent = async function (roomId, eventId) {
+    const path = utils.encodeUri('/rooms/$roomId/event/$eventId', {
+        $roomId: roomId,
+        $eventId: eventId,
+    });
+    let res;
+    try {
+        res = await this._http.authedRequest(undefined, 'GET', path);
+    }
+    catch (e) { }
+    if (!res || !res.event)
+        throw new Error("'event' not in '/event' result - homeserver too old?");
+    return this.getEventMapper()(res.event);
+};
+// XXX: use getEventTimeline once we store rooms properly
+matrix_js_sdk_1.MatrixClient.prototype.fetchEventContext = async function (roomId, eventId) {
+    const path = utils.encodeUri('/rooms/$roomId/context/$eventId', {
+        $roomId: roomId,
+        $eventId: eventId,
+    });
+    let res;
+    try {
+        res = await this._http.authedRequest(undefined, 'GET', path);
+    }
+    catch (e) { }
+    if (!res || !res.event)
+        throw new Error("'event' not in '/event' result - homeserver too old?");
+    const mapper = this.getEventMapper();
+    const event = mapper(res.event);
+    const state = utils.map(res.state, mapper);
+    const events_after = utils.map(res.events_after, mapper);
+    const events_before = utils.map(res.events_before, mapper);
+    return {
+        event,
+        context: {
+            state,
+            events_after,
+            events_before,
+        },
+    };
+};
 class Search {
     constructor(cli) {
         this.cli = cli;
+    }
+    async resolveOne(eventId, context) {
+    }
+    // keep context as a map, so the whole thing can just be nulled.
+    async resolve(eventIds, context) {
     }
     // keys: pass straight through to go-bleve
     // searchFilter: compute and send search rules to go-bleve
@@ -176,10 +231,14 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    Query(keys, searchFilter, roomIDsSet, orderBy, searchTerm, from, context) {
+    async query(keys, searchFilter, orderBy, searchTerm, from, context) {
         const queries = [];
         // must satisfy room_id
-        queries.push(new Query('room_id', QueryType.Must, roomIDsSet));
+        if (searchFilter.rooms.size > 0)
+            queries.push(new Query('room_id', QueryType.Must, searchFilter.rooms));
+        // must satisfy !room_id
+        if (searchFilter.notRooms.size > 0)
+            queries.push(new Query('room_id', QueryType.MustNot, searchFilter.notRooms));
         // must satisfy sender
         if (searchFilter.senders.size > 0)
             queries.push(new Query('sender', QueryType.Must, searchFilter.senders));
@@ -194,7 +253,8 @@ class Search {
             queries.push(new Query('type', QueryType.MustNot, searchFilter.notTypes));
         const r = new BleveRequest(keys, queries, orderBy, searchTerm, from, pageSize);
         console.log(JSON.stringify(r));
-        this.cli.addListener('', () => { });
+        const resp = await b.search(r);
+        console.log("DEBUG: ", resp);
     }
 }
 var SearchOrder;
@@ -209,7 +269,7 @@ async function setup() {
         accessToken: global.localStorage.getItem('accessToken'),
     };
     if (!creds.userId || !creds.deviceId || !creds.accessToken) {
-        const loginClient = matrix_js_sdk_1.createClient({
+        const loginClient = matrix_js_sdk_2.createClient({
             baseUrl: 'https://matrix.org',
         });
         try {
@@ -234,13 +294,16 @@ async function setup() {
             process.exit(1);
         }
     }
-    const cli = matrix_js_sdk_1.createClient(Object.assign({ baseUrl: 'https://matrix.org', idBaseUrl: '' }, creds, { 
-        // userId: '@webdevguru:matrix.org',
-        // accessToken: 'MDAxOGxvY2F0aW9uIG1hdHJpeC5vcmcKMDAxM2lkZW50aWZpZXIga2V5CjAwMTBjaWQgZ2VuID0gMQowMDI5Y2lkIHVzZXJfaWQgPSBAd2ViZGV2Z3VydTptYXRyaXgub3JnCjAwMTZjaWQgdHlwZSA9IGFjY2VzcwowMDIxY2lkIG5vbmNlID0gLlhXVmh5RmZlMFFvQStWagowMDJmc2lnbmF0dXJlII5wMRc3oQpfpot5KJVTm49iORiVXMSl3aUfD4eLV2-6Cg',
-        // deviceId: 'IWRTHSJSIC',
-        useAuthorizationHeader: true, 
+    const cli = matrix_js_sdk_2.createClient(Object.assign({ baseUrl: 'https://matrix.org', idBaseUrl: '' }, creds, { useAuthorizationHeader: true, 
         // sessionStore: new LevelStore(),
-        sessionStore: new matrix_js_sdk_1.WebStorageSessionStore(global.localStorage) }));
+        // store: new IndexedDBStore({
+        //     indexedDB: indexedDB,
+        //     dbName: 'matrix-search-sync',
+        //     localStorage: global.localStorage,
+        // }),
+        store: new matrix_js_sdk_2.MatrixInMemoryStore({
+            localStorage: global.localStorage,
+        }), sessionStore: new matrix_js_sdk_2.WebStorageSessionStore(global.localStorage) }));
     cli.on('event', (event) => {
         if (event.isEncrypted())
             return;
@@ -253,8 +316,14 @@ async function setup() {
         }
         return q.push(event);
     });
-    await cli.initCrypto();
+    try {
+        await cli.initCrypto();
+    }
+    catch (e) {
+        console.log(e);
+    }
     cli.startClient();
+    // process.exit(1);
     const app = express_1.default();
     app.use(body_parser_1.default.json());
     app.use(cors_1.default({
@@ -264,20 +333,19 @@ async function setup() {
         'methods': 'POST',
         'preflightContinue': false
     }));
-    app.post('/search', (req, res) => {
+    app.post('/search', async (req, res) => {
         if (!req.body) {
             res.sendStatus(400);
             return;
         }
         let nextBatch = null;
         if (req.query['next_batch']) {
-            const decoded = global.atob(req.query['next_batch']);
             try {
-                nextBatch = JSON.parse(decoded);
+                nextBatch = JSON.parse(global.atob(req.query['next_batch']));
                 console.info("Found next batch of", nextBatch);
             }
             catch (e) {
-                console.error("Failed to parse next_batch argument");
+                console.error("Failed to parse next_batch argument", e);
             }
         }
         // verify that user is allowed to access this thing
@@ -318,7 +386,8 @@ async function setup() {
                 });
                 return;
             }
-            let roomIdsSet = searchFilter.filterRooms(roomIds);
+            // SKIP for now
+            // let roomIdsSet = searchFilter.filterRooms(roomIds);
             // if (b.isGrouping("room_id")) {
             //     roomIDsSet.Intersect(common.NewStringSet([]string{*b.GroupKey}))
             // }
@@ -340,11 +409,11 @@ async function setup() {
                 case 'rank':
                 case '':
                     // get messages from Bleve by rank // resolve them locally
-                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Rank, searchTerm, 0, eventContext);
+                    search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
                     break;
                 case 'recent':
                     const from = nextBatch !== null ? nextBatch.from() : 0;
-                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Recent, searchTerm, from, eventContext);
+                    search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
                     // TODO get next back here
                     break;
                 default:

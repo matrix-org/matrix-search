@@ -30,7 +30,12 @@ export class MatrixError {
 export class MatrixClient {
     constructor(opts: MatrixClientOpts);
 
+    _http: any;
+
     private _requestTokenFromEndpoint(endpoint: string, params: object): Promise<string>
+
+    fetchEvent(roomId: string, eventId: string);
+    fetchEventContext(roomId: string, eventId: string)
 
     acceptGroupInvite(groupId: string, opts: object): Promise<object> | MatrixError;
     addListener(event: string, listener: any);

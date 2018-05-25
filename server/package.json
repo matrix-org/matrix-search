@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node %NODE_DEBUG_OPTION% index.js"
+    "start": "node %NODE_DEBUG_OPTION% --trace-warnings index.js"
   },
   "repository": {
     "type": "git",

@@ -1,46 +1,56 @@
-import {RequestPromise, RequestPromiseOptions} from "request-promise";
-
-import cors from 'cors';
-import { Request, Response } from "express";
-
-export interface Global {
+declare var global: {
     Olm: any
     localStorage?: any
     atob: (string) => string;
-}
+};
 
-declare var global: Global;
+// import * as request from "request-promise";
+import {RequestPromise, RequestPromiseOptions} from "request-promise";
+import cors from 'cors';
+import express, {Request, Response} from "express";
+import bodyParser from 'body-parser';
+import * as mkdirp from "mkdirp";
 
-global.Olm = require('olm');
-import {
-    createClient,
-    WebStorageSessionStore,
-    setCryptoStoreFactory,
-    IndexedDBCryptoStore,
-} from 'matrix-js-sdk';
+import {RequestAPI, RequiredUriUrl} from "request";
+import {Matrix, MatrixClient, MatrixEvent, Room} from "./typings/matrix-js-sdk";
+import sqlite3 from 'sqlite3';
+
+const indexeddbjs = require('indexeddb-js');
+const Queue = require('better-queue');
+const SqliteStore = require('better-queue-sqlite');
+const request = require('request-promise');
+
+// process.on('unhandledRejection', (reason, p) => {
+//     console.log("Unhandled at : Promise", p, "reason:", reason);
+    // console.log(reason.stack);
+// });
+
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 // import StubStore from 'matrix-js-sdk/src/store/stub.js';
 
 // import * as LevelStore from './level-store';
 // import * as Promise from 'bluebird';
 
+// create directory which will house the 3 stores.
+mkdirp.sync('./store');
 // Loading localStorage module
-if (typeof global.localStorage === "undefined" || global.localStorage === null) {
-    global.localStorage = new (require('node-localstorage').LocalStorage)('./store');
-}
+if (typeof global.localStorage === "undefined" || global.localStorage === null)
+    global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
 
-const sqlite3 = require('sqlite3');
-const indexeddbjs = require('indexeddb-js');
+global.Olm = require('olm');
 
-import * as request from 'request-promise';
-import {RequestAPI, RequiredUriUrl} from "request";
-import {Group, MatrixClient, MatrixEvent, requestFunction, Room} from "./typings/matrix-js-sdk";
+import {
+    createClient,
+    IndexedDBCryptoStore,
+    IndexedDBStore,
+    MatrixInMemoryStore,
+    setCryptoStoreFactory,
+    WebStorageSessionStore,
+} from 'matrix-js-sdk';
 
-// const request = require('request-promise');
+const utils = require('matrix-js-sdk/src/utils');
 
-const Queue = require('better-queue');
-
-const engine = new sqlite3.Database('./store.sqlite');
+const engine = new sqlite3.Database('./store/indexedb.sqlite');
 const scope = indexeddbjs.makeScope('sqlite3', engine);
 const indexedDB = scope.indexedDB;
 
@@ -50,9 +60,6 @@ if (indexedDB) {
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(null));
 }
 
-import express from 'express';
-import bodyParser from 'body-parser';
-import {type} from "os";
 
 class BleveHttp {
     request: RequestAPI<RequestPromise, RequestPromiseOptions, RequiredUriUrl>;
@@ -63,19 +70,21 @@ class BleveHttp {
         });
     }
 
-    async search() {
-
+    search(req: BleveRequest) {
+        return this.request({
+            url: 'query',
+            method: 'POST',
+            json: true,
+            body: req,
+        });
     }
 
-    async index(events: MatrixEvent[]) {
-        return await this.request({
+    index(events: MatrixEvent[]) {
+        return this.request({
             url: 'index',
             method: 'PUT',
             json: true,
             body: events.map(ev => ev.event),
-        }).then(resp => {
-            // if resp is not successful return a failure
-            return Promise.reject('');
         });
     }
 }
@@ -88,18 +97,16 @@ const q = new Queue((batch: MatrixEvent[], cb) => {
     batchSize: 100,
     maxRetries: 10,
     retryDelay: 1000,
-    store: {
-        type: 'sql',
-        dialect: 'sqlite',
-        path: './queue'
-    },
+    store: new SqliteStore({
+        path: './store/queue',
+    }),
     filter: (event: MatrixEvent, cb) => {
         if (event.getType() !== 'm.room.message') return cb(null, event);
         return cb('not m.room.message');
     }
 });
 
-setup().then().catch();
+setup().then(console.log).catch(console.error);
 
 function intersect(a: Set<string>, b: Set<string>): Set<string> {
     return new Set([...a].filter(x => b.has(x)));
@@ -219,13 +226,13 @@ class Query {
 class BleveRequest {
     keys: Array<string>;
     filter: Array<Query>;
-    sortBy: string;
+    sortBy: SearchOrder;
     searchTerm: string;
     from: number;
     size: number;
 
 
-    constructor(keys: Array<string>, filter: Array<Query>, orderBy: string, searchTerm: string, from: number, size: number) {
+    constructor(keys: Array<string>, filter: Array<Query>, orderBy: SearchOrder, searchTerm: string, from: number, size: number) {
         this.keys = keys;
         this.filter = filter;
         this.sortBy = orderBy;
@@ -248,11 +255,79 @@ interface BleveResponse {
 
 const pageSize = 10;
 
+interface RoomEventId {
+    roomId: string;
+    eventId: string;
+}
+
+interface EventLookupResult {
+
+}
+
+MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: string) {
+    const path = utils.encodeUri('/rooms/$roomId/event/$eventId', {
+        $roomId: roomId,
+        $eventId: eventId,
+    });
+
+    let res;
+    try {
+        res = await this._http.authedRequest(undefined, 'GET', path);
+    } catch (e) {}
+
+    if (!res || !res.event)
+        throw new Error("'event' not in '/event' result - homeserver too old?");
+
+    return this.getEventMapper()(res.event);
+};
+
+// XXX: use getEventTimeline once we store rooms properly
+MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventId: string) {
+    const path = utils.encodeUri('/rooms/$roomId/context/$eventId', {
+        $roomId: roomId,
+        $eventId: eventId,
+    });
+
+    let res;
+    try {
+        res = await this._http.authedRequest(undefined, 'GET', path);
+    } catch (e) {}
+
+    if (!res || !res.event)
+        throw new Error("'event' not in '/event' result - homeserver too old?");
+
+    const mapper = this.getEventMapper();
+
+    const event = mapper(res.event);
+
+    const state = utils.map(res.state, mapper);
+    const events_after = utils.map(res.events_after, mapper);
+    const events_before = utils.map(res.events_before, mapper);
+
+    return {
+        event,
+        context: {
+            state,
+            events_after,
+            events_before,
+        },
+    };
+};
+
 class Search {
     cli: MatrixClient;
 
     constructor(cli: MatrixClient) {
         this.cli = cli;
+    }
+
+    async resolveOne(eventId: RoomEventId, context: any) {
+
+    }
+
+    // keep context as a map, so the whole thing can just be nulled.
+    async resolve(eventIds: Array<RoomEventId>, context: any) {
+
     }
 
     // keys: pass straight through to go-bleve
@@ -262,11 +337,16 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    Query(keys: Array<string>, searchFilter: Filter, roomIDsSet: Set<string>, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean) {
+    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean) {
         const queries: Array<Query> = [];
 
         // must satisfy room_id
-        queries.push(new Query('room_id', QueryType.Must, roomIDsSet));
+        if (searchFilter.rooms.size > 0)
+            queries.push(new Query('room_id', QueryType.Must, searchFilter.rooms));
+
+        // must satisfy !room_id
+        if (searchFilter.notRooms.size > 0)
+            queries.push(new Query('room_id', QueryType.MustNot, searchFilter.notRooms));
 
         // must satisfy sender
         if (searchFilter.senders.size > 0)
@@ -285,7 +365,8 @@ class Search {
         const r = new BleveRequest(keys, queries, orderBy, searchTerm, from, pageSize);
         console.log(JSON.stringify(r));
 
-        this.cli.addListener('', () => {});
+        const resp = await b.search(r);
+        console.log("DEBUG: ", resp);
     }
 }
 
@@ -334,11 +415,16 @@ async function setup() {
         baseUrl: 'https://matrix.org',
         idBaseUrl: '',
         ...creds,
-        // userId: '@webdevguru:matrix.org',
-        // accessToken: 'MDAxOGxvY2F0aW9uIG1hdHJpeC5vcmcKMDAxM2lkZW50aWZpZXIga2V5CjAwMTBjaWQgZ2VuID0gMQowMDI5Y2lkIHVzZXJfaWQgPSBAd2ViZGV2Z3VydTptYXRyaXgub3JnCjAwMTZjaWQgdHlwZSA9IGFjY2VzcwowMDIxY2lkIG5vbmNlID0gLlhXVmh5RmZlMFFvQStWagowMDJmc2lnbmF0dXJlII5wMRc3oQpfpot5KJVTm49iORiVXMSl3aUfD4eLV2-6Cg',
-        // deviceId: 'IWRTHSJSIC',
         useAuthorizationHeader: true,
         // sessionStore: new LevelStore(),
+        // store: new IndexedDBStore({
+        //     indexedDB: indexedDB,
+        //     dbName: 'matrix-search-sync',
+        //     localStorage: global.localStorage,
+        // }),
+        store: new MatrixInMemoryStore({
+            localStorage: global.localStorage,
+        }),
         sessionStore: new WebStorageSessionStore(global.localStorage),
     });
 
@@ -354,8 +440,13 @@ async function setup() {
         return q.push(event);
     });
 
-    await cli.initCrypto();
+    try {
+        await cli.initCrypto();
+    } catch (e) {
+        console.log(e);
+    }
     cli.startClient();
+    // process.exit(1);
 
     const app = express();
     app.use(bodyParser.json());
@@ -367,7 +458,7 @@ async function setup() {
         'preflightContinue': false
     }));
 
-    app.post('/search', (req: Request, res: Response) => {
+    app.post('/search', async (req: Request, res: Response) => {
         if (!req.body) {
             res.sendStatus(400);
             return;
@@ -375,12 +466,11 @@ async function setup() {
 
         let nextBatch: Batch | null = null;
         if (req.query['next_batch']) {
-            const decoded = global.atob(req.query['next_batch']);
             try {
-                nextBatch = JSON.parse(decoded);
+                nextBatch = JSON.parse(global.atob(req.query['next_batch']));
                 console.info("Found next batch of", nextBatch);
             } catch (e) {
-                console.error("Failed to parse next_batch argument");
+                console.error("Failed to parse next_batch argument", e);
             }
         }
 
@@ -429,7 +519,8 @@ async function setup() {
                 return;
             }
 
-            let roomIdsSet = searchFilter.filterRooms(roomIds);
+            // SKIP for now
+            // let roomIdsSet = searchFilter.filterRooms(roomIds);
 
             // if (b.isGrouping("room_id")) {
             //     roomIDsSet.Intersect(common.NewStringSet([]string{*b.GroupKey}))
@@ -458,12 +549,12 @@ async function setup() {
                 case 'rank':
                 case '':
                     // get messages from Bleve by rank // resolve them locally
-                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Rank, searchTerm, 0, eventContext);
+                    search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
                     break;
 
                 case 'recent':
                     const from = nextBatch !== null ? nextBatch.from() : 0;
-                    search.Query(keys, searchFilter, roomIdsSet, SearchOrder.Recent, searchTerm, from, eventContext);
+                    search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
                     // TODO get next back here
                     break;
 

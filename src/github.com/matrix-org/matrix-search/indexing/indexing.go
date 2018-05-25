@@ -92,7 +92,7 @@ func (i *Indexer) Query(sr *bleve.SearchRequest) (*bleve.SearchResult, error) {
 //	collection := i.GetIndex("")
 //	request := makeSearchQuery(qs)
 //
-//	roomIdQueries := make([]query.Query, 0, len(roomIds))
+//	roomIdQueries := make([]query.query, 0, len(roomIds))
 //	for _, roomId := range roomIds {
 //		qr := query.NewTermQuery(roomId)
 //		qr.SetField("room_id")
