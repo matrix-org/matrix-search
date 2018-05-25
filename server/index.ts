@@ -260,11 +260,22 @@ interface RoomEventId {
     eventId: string;
 }
 
-interface EventLookupResult {
-
+interface EventLookupContext {
+    start: string;
+    end: string;
+    eventsBefore: Array<MatrixEvent>;
+    eventsAfter: Array<MatrixEvent>;
+    state: Array<MatrixEvent>;
 }
 
-MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: string) {
+interface EventLookupResult {
+    event: MatrixEvent;
+    score: number;
+    context: EventLookupContext | null;
+    highlights: Set<string>;
+}
+
+MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: string): Promise<MatrixEvent> {
     const path = utils.encodeUri('/rooms/$roomId/event/$eventId', {
         $roomId: roomId,
         $eventId: eventId,
@@ -281,8 +292,17 @@ MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: stri
     return this.getEventMapper()(res.event);
 };
 
+interface EventWithContext {
+    event: MatrixEvent;
+    context: {
+        state: Array<MatrixEvent>;
+        events_after: Array<MatrixEvent>;
+        events_before: Array<MatrixEvent>;
+    };
+}
+
 // XXX: use getEventTimeline once we store rooms properly
-MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventId: string) {
+MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventId: string): Promise<EventWithContext> {
     const path = utils.encodeUri('/rooms/$roomId/context/$eventId', {
         $roomId: roomId,
         $eventId: eventId,
@@ -322,7 +342,7 @@ class Search {
     }
 
     async resolveOne(eventId: RoomEventId, context: any) {
-
+    //
     }
 
     // keep context as a map, so the whole thing can just be nulled.
@@ -337,7 +357,7 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean) {
+    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<> {
         const queries: Array<Query> = [];
 
         // must satisfy room_id

@@ -220,6 +220,7 @@ class Search {
         this.cli = cli;
     }
     async resolveOne(eventId, context) {
+        //
     }
     // keep context as a map, so the whole thing can just be nulled.
     async resolve(eventIds, context) {
