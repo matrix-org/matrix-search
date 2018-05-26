@@ -1,5 +1,9 @@
 package common
 
+import (
+	"github.com/gin-gonic/gin/json"
+)
+
 type StringSet map[string]struct{}
 
 func (ss StringSet) AddStrings(str []string) {
@@ -41,6 +45,10 @@ func (ss StringSet) ToArray() []string {
 		arr = append(arr, k)
 	}
 	return arr
+}
+
+func (ss StringSet) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ss.ToArray())
 }
 
 func NewStringSet(str []string) StringSet {

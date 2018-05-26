@@ -188,6 +188,10 @@ matrix_js_sdk_1.MatrixClient.prototype.fetchEvent = async function (roomId, even
         throw new Error("'event' not in '/event' result - homeserver too old?");
     return this.getEventMapper()(res.event);
 };
+// "dumb" mapper because e2e should be decrypted in browser, so we don't lose verification status
+function mapper(cli, plainOldJsObject) {
+    return new matrix_js_sdk_1.MatrixEvent(plainOldJsObject);
+}
 // XXX: use getEventTimeline once we store rooms properly
 matrix_js_sdk_1.MatrixClient.prototype.fetchEventContext = async function (roomId, eventId) {
     const path = utils.encodeUri('/rooms/$roomId/context/$eventId', {
@@ -201,8 +205,8 @@ matrix_js_sdk_1.MatrixClient.prototype.fetchEventContext = async function (roomI
     catch (e) { }
     if (!res || !res.event)
         throw new Error("'event' not in '/event' result - homeserver too old?");
-    const mapper = this.getEventMapper();
-    const event = mapper(res.event);
+    // const mapper = this.getEventMapper();
+    const event = mapper(this, res.event);
     const state = utils.map(res.state, mapper);
     const events_after = utils.map(res.events_after, mapper);
     const events_before = utils.map(res.events_before, mapper);
@@ -219,11 +223,17 @@ class Search {
     constructor(cli) {
         this.cli = cli;
     }
-    async resolveOne(eventId, context) {
-        //
+    // impedance matching.
+    async resolveOne(roomId, eventId, context) {
+        if (context)
+            return await this.cli.fetchEventContext(roomId, eventId);
+        return {
+            event: await this.cli.fetchEvent(roomId, eventId),
+        };
     }
     // keep context as a map, so the whole thing can just be nulled.
-    async resolve(eventIds, context) {
+    async resolve(rows, context) {
+        return [];
     }
     // keys: pass straight through to go-bleve
     // searchFilter: compute and send search rules to go-bleve

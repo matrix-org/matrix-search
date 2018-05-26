@@ -27,6 +27,15 @@ export class MatrixError {
     constructor(errorJson: any);
 }
 
+export interface EventWithContext {
+    event: MatrixEvent;
+    context?: {
+        state: Array<MatrixEvent>;
+        events_after: Array<MatrixEvent>;
+        events_before: Array<MatrixEvent>;
+    };
+}
+
 export class MatrixClient {
     constructor(opts: MatrixClientOpts);
 
@@ -34,8 +43,8 @@ export class MatrixClient {
 
     private _requestTokenFromEndpoint(endpoint: string, params: object): Promise<string>
 
-    fetchEvent(roomId: string, eventId: string);
-    fetchEventContext(roomId: string, eventId: string)
+    fetchEvent(roomId: string, eventId: string): Promise<MatrixEvent>;
+    fetchEventContext(roomId: string, eventId: string): Promise<EventWithContext>
 
     acceptGroupInvite(groupId: string, opts: object): Promise<object> | MatrixError;
     addListener(event: string, listener: any);

@@ -31,6 +31,18 @@ type QueryRequest struct {
 	Size       int           `json:"size"`
 }
 
+type ResponseRow struct {
+	RoomID     string           `json:"roomId"`
+	EventID    string           `json:"eventId"`
+	Score      float64          `json:"score"`
+	Highlights common.StringSet `json:"highlights"`
+}
+
+type QueryResponse struct {
+	Rows  []ResponseRow `json:"rows"`
+	Total uint64        `json:"total"`
+}
+
 func (req *QueryRequest) Valid() bool {
 	if req.SortBy != "rank" && req.SortBy != "recent" {
 		return false
@@ -105,6 +117,22 @@ func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
 	return sr
 }
 
+func calculateHighlights(hit *search.DocumentMatch, keys []string) (highlights common.StringSet) {
+	for _, key := range keys {
+		if matches, ok := hit.Locations[key]; ok {
+			for match := range matches {
+				highlights.AddString(match)
+			}
+		}
+	}
+	return
+}
+
+func splitRoomEventIDs(str string) (roomID, eventID string) {
+	segs := strings.SplitN(str, "/", 2)
+	return segs[0], segs[1]
+}
+
 func main() {
 	conf := common.LoadConfig()
 	if conf == nil {
@@ -167,7 +195,29 @@ func main() {
 		sr := req.generateSearchRequest()
 		resp, err := idxr.Query(sr)
 
+		if err != nil {
+			panic(err)
+		}
+
+		res := QueryResponse{
+			Total: resp.Total,
+			Rows:  make([]ResponseRow, len(resp.Hits)),
+		}
+
+		for i := 0; i < len(resp.Hits); i++ {
+			roomID, eventID := splitRoomEventIDs(resp.Hits[i].ID)
+
+			res.Rows[i].RoomID = roomID
+			res.Rows[i].EventID = eventID
+			res.Rows[i].Score = resp.Hits[i].Score
+			res.Rows[i].Highlights = calculateHighlights(resp.Hits[i], req.Keys)
+		}
+
 		fmt.Println(resp, err)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(res)
 
 	}).Methods("POST")
 

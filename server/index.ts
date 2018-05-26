@@ -12,7 +12,7 @@ import bodyParser from 'body-parser';
 import * as mkdirp from "mkdirp";
 
 import {RequestAPI, RequiredUriUrl} from "request";
-import {Matrix, MatrixClient, MatrixEvent, Room} from "./typings/matrix-js-sdk";
+import {Event, EventWithContext, Matrix, MatrixClient, MatrixEvent, Room} from "./typings/matrix-js-sdk";
 import sqlite3 from 'sqlite3';
 
 const indexeddbjs = require('indexeddb-js');
@@ -255,9 +255,11 @@ interface BleveResponse {
 
 const pageSize = 10;
 
-interface RoomEventId {
+interface BleveResponseRow {
     roomId: string;
     eventId: string;
+    score: number;
+    highlights: string;
 }
 
 interface EventLookupContext {
@@ -292,13 +294,9 @@ MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: stri
     return this.getEventMapper()(res.event);
 };
 
-interface EventWithContext {
-    event: MatrixEvent;
-    context: {
-        state: Array<MatrixEvent>;
-        events_after: Array<MatrixEvent>;
-        events_before: Array<MatrixEvent>;
-    };
+// "dumb" mapper because e2e should be decrypted in browser, so we don't lose verification status
+function mapper(cli: MatrixClient, plainOldJsObject: Event): MatrixEvent {
+    return new MatrixEvent(plainOldJsObject);
 }
 
 // XXX: use getEventTimeline once we store rooms properly
@@ -316,9 +314,9 @@ MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventI
     if (!res || !res.event)
         throw new Error("'event' not in '/event' result - homeserver too old?");
 
-    const mapper = this.getEventMapper();
+    // const mapper = this.getEventMapper();
 
-    const event = mapper(res.event);
+    const event = mapper(this, res.event);
 
     const state = utils.map(res.state, mapper);
     const events_after = utils.map(res.events_after, mapper);
@@ -341,13 +339,19 @@ class Search {
         this.cli = cli;
     }
 
-    async resolveOne(eventId: RoomEventId, context: any) {
-    //
+    // impedance matching.
+    async resolveOne(roomId: string, eventId: string, context: boolean): Promise<EventWithContext> {
+        if (context)
+            return await this.cli.fetchEventContext(roomId, eventId);
+
+        return {
+            event: await this.cli.fetchEvent(roomId, eventId),
+        };
     }
 
     // keep context as a map, so the whole thing can just be nulled.
-    async resolve(eventIds: Array<RoomEventId>, context: any) {
-
+    async resolve(rows: Array<BleveResponseRow>, context: boolean): Promise<Array<EventLookupResult>> {
+        return [];
     }
 
     // keys: pass straight through to go-bleve
@@ -357,7 +361,7 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<> {
+    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>> {
         const queries: Array<Query> = [];
 
         // must satisfy room_id
@@ -387,6 +391,8 @@ class Search {
 
         const resp = await b.search(r);
         console.log("DEBUG: ", resp);
+
+
     }
 }
 
