@@ -12,7 +12,6 @@ import bodyParser from 'body-parser';
 import * as mkdirp from "mkdirp";
 
 import {RequestAPI, RequiredUriUrl} from "request";
-import {Event, EventWithContext, Matrix, MatrixClient, MatrixEvent, Room} from "./typings/matrix-js-sdk";
 import sqlite3 from 'sqlite3';
 
 const indexeddbjs = require('indexeddb-js');
@@ -37,13 +36,20 @@ mkdirp.sync('./store');
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
     global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
 
+// import Olm before importing js-sdk to prevent it crying
 global.Olm = require('olm');
 
 import {
+    Room,
+    Event,
+    Matrix,
+    MatrixEvent,
     createClient,
-    IndexedDBCryptoStore,
+    MatrixClient,
     IndexedDBStore,
+    EventWithContext,
     MatrixInMemoryStore,
+    IndexedDBCryptoStore,
     setCryptoStoreFactory,
     WebStorageSessionStore,
 } from 'matrix-js-sdk';
@@ -70,7 +76,7 @@ class BleveHttp {
         });
     }
 
-    search(req: BleveRequest) {
+    search(req: BleveRequest){
         return this.request({
             url: 'query',
             method: 'POST',
@@ -91,26 +97,41 @@ class BleveHttp {
 
 const b = new BleveHttp("http://localhost:9999/api/");
 
-const q = new Queue((batch: MatrixEvent[], cb) => {
-    b.index(batch).then(cb);
+const q = new Queue(async (batch: MatrixEvent[], cb) => {
+    try {
+        cb(null, await b.index(batch));
+    } catch (e) {
+        cb(e);
+    }
 }, {
     batchSize: 100,
     maxRetries: 10,
     retryDelay: 1000,
     store: new SqliteStore({
-        path: './store/queue',
+        path: './store/queue.sqlite',
     }),
     filter: (event: MatrixEvent, cb) => {
-        if (event.getType() !== 'm.room.message') return cb(null, event);
-        return cb('not m.room.message');
+        if (event.getType() !== 'm.room.message') return cb('not m.room.message');
+        console.log("Enqueue event: ", event.getId());
+        return cb(null, event);
     }
 });
 
 setup().then(console.log).catch(console.error);
 
-function intersect(a: Set<string>, b: Set<string>): Set<string> {
-    return new Set([...a].filter(x => b.has(x)));
+declare global {
+    interface Set<T> {
+        intersect<T>(s: Set<T>): Set<T>;
+        union<T>(s: Set<T>): Set<T>;
+    }
 }
+
+Set.prototype.intersect = function<T>(s: Set<T>): Set<T> {
+    return new Set<T>([...this].filter(x => s.has(x)));
+};
+Set.prototype.union = function<T>(s: Set<T>): Set<T> {
+    return new Set<T>([...this, ...s]);
+};
 
 class Filter {
     rooms: Set<string>;
@@ -132,17 +153,6 @@ class Filter {
 
         this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
         this.containsURL = o['contains_url'];
-    }
-
-    filterRooms(roomIds: Array<string>): Set<string> {
-        let roomIdsSet = new Set<string>(roomIds);
-
-        if (this.notRooms)
-            this.notRooms.forEach(notRoom => roomIdsSet.delete(notRoom))
-        if (this.rooms)
-            roomIdsSet = intersect(roomIdsSet, this.rooms);
-
-        return roomIdsSet;
     }
 }
 
@@ -242,24 +252,18 @@ class BleveRequest {
     }
 }
 
-interface BleveResponseEvent {
-    eventId: string;
-    rank: number;
-}
-
-interface BleveResponse {
-    highlights: Array<string>;
-    events: Array<BleveResponseEvent>;
-    nextFrom: number;
-}
-
 const pageSize = 10;
 
 interface BleveResponseRow {
     roomId: string;
     eventId: string;
     score: number;
-    highlights: string;
+    highlights: Set<string>;
+}
+
+interface BleveResponse {
+    rows: Array<BleveResponseRow>;
+    total: number;
 }
 
 interface EventLookupContext {
@@ -361,7 +365,7 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>> {
+    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>|null> {
         const queries: Array<Query> = [];
 
         // must satisfy room_id
@@ -392,7 +396,7 @@ class Search {
         const resp = await b.search(r);
         console.log("DEBUG: ", resp);
 
-
+        return null;
     }
 }
 

@@ -237,11 +237,6 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	englishTextFieldMapping := bleve.NewTextFieldMapping()
 	englishTextFieldMapping.Analyzer = en.AnalyzerName
 
-	// a generic reusable mapping for keyword text
-	keywordFieldMapping := bleve.NewTextFieldMapping()
-	keywordFieldMapping.Analyzer = keyword.Name
-	keywordFieldMapping.IncludeInAll = false
-
 	// a specific mapping to index the description fields
 	// detected language
 	descriptionLangFieldMapping := bleve.NewTextFieldMapping()
@@ -259,9 +254,20 @@ func createEventMapping() (mapping.IndexMapping, error) {
 
 	eventMapping := bleve.NewDocumentMapping()
 
-	eventMapping.AddFieldMappingsAt("room_id", keywordFieldMapping)
-	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
-	eventMapping.AddFieldMappingsAt("type", keywordFieldMapping)
+	roomIdFieldMapping := bleve.NewTextFieldMapping()
+	roomIdFieldMapping.Analyzer = keyword.Name
+	roomIdFieldMapping.IncludeInAll = false
+	eventMapping.AddFieldMappingsAt("room_id", roomIdFieldMapping)
+
+	senderFieldMapping := bleve.NewTextFieldMapping()
+	senderFieldMapping.Analyzer = keyword.Name
+	senderFieldMapping.IncludeInAll = false
+	eventMapping.AddFieldMappingsAt("sender", senderFieldMapping)
+
+	typeFieldMapping := bleve.NewTextFieldMapping()
+	typeFieldMapping.Analyzer = keyword.Name
+	typeFieldMapping.IncludeInAll = false
+	eventMapping.AddFieldMappingsAt("type", typeFieldMapping)
 
 	//roomIDMapping := bleve.NewTextFieldMapping()
 	//roomIDMapping.IncludeInAll = false

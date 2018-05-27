@@ -14,7 +14,6 @@ const cors_1 = __importDefault(require("cors"));
 const express_1 = __importDefault(require("express"));
 const body_parser_1 = __importDefault(require("body-parser"));
 const mkdirp = __importStar(require("mkdirp"));
-const matrix_js_sdk_1 = require("./typings/matrix-js-sdk");
 const sqlite3_1 = __importDefault(require("sqlite3"));
 const indexeddbjs = require('indexeddb-js');
 const Queue = require('better-queue');
@@ -33,15 +32,16 @@ mkdirp.sync('./store');
 // Loading localStorage module
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
     global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
+// import Olm before importing js-sdk to prevent it crying
 global.Olm = require('olm');
-const matrix_js_sdk_2 = require("matrix-js-sdk");
+const matrix_js_sdk_1 = require("matrix-js-sdk");
 const utils = require('matrix-js-sdk/src/utils');
 const engine = new sqlite3_1.default.Database('./store/indexedb.sqlite');
 const scope = indexeddbjs.makeScope('sqlite3', engine);
 const indexedDB = scope.indexedDB;
 if (indexedDB) {
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(indexedDB, 'matrix-js-sdk:crypto'));
-    matrix_js_sdk_2.setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
+    matrix_js_sdk_1.setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(null));
 }
 class BleveHttp {
@@ -68,25 +68,34 @@ class BleveHttp {
     }
 }
 const b = new BleveHttp("http://localhost:9999/api/");
-const q = new Queue((batch, cb) => {
-    b.index(batch).then(cb);
+const q = new Queue(async (batch, cb) => {
+    try {
+        cb(null, await b.index(batch));
+    }
+    catch (e) {
+        cb(e);
+    }
 }, {
     batchSize: 100,
     maxRetries: 10,
     retryDelay: 1000,
     store: new SqliteStore({
-        path: './store/queue',
+        path: './store/queue.sqlite',
     }),
     filter: (event, cb) => {
         if (event.getType() !== 'm.room.message')
-            return cb(null, event);
-        return cb('not m.room.message');
+            return cb('not m.room.message');
+        console.log("Enqueue event: ", event.getId());
+        return cb(null, event);
     }
 });
 setup().then(console.log).catch(console.error);
-function intersect(a, b) {
-    return new Set([...a].filter(x => b.has(x)));
-}
+Set.prototype.intersect = function (s) {
+    return new Set([...this].filter(x => s.has(x)));
+};
+Set.prototype.union = function (s) {
+    return new Set([...this, ...s]);
+};
 class Filter {
     constructor(o) {
         this.rooms = new Set(o['rooms']);
@@ -97,14 +106,6 @@ class Filter {
         this.notTypes = new Set(o['not_types']);
         this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
         this.containsURL = o['contains_url'];
-    }
-    filterRooms(roomIds) {
-        let roomIdsSet = new Set(roomIds);
-        if (this.notRooms)
-            this.notRooms.forEach(notRoom => roomIdsSet.delete(notRoom));
-        if (this.rooms)
-            roomIdsSet = intersect(roomIdsSet, this.rooms);
-        return roomIdsSet;
     }
 }
 class Result {
@@ -266,6 +267,7 @@ class Search {
         console.log(JSON.stringify(r));
         const resp = await b.search(r);
         console.log("DEBUG: ", resp);
+        return null;
     }
 }
 var SearchOrder;
@@ -280,7 +282,7 @@ async function setup() {
         accessToken: global.localStorage.getItem('accessToken'),
     };
     if (!creds.userId || !creds.deviceId || !creds.accessToken) {
-        const loginClient = matrix_js_sdk_2.createClient({
+        const loginClient = matrix_js_sdk_1.createClient({
             baseUrl: 'https://matrix.org',
         });
         try {
@@ -305,16 +307,16 @@ async function setup() {
             process.exit(1);
         }
     }
-    const cli = matrix_js_sdk_2.createClient(Object.assign({ baseUrl: 'https://matrix.org', idBaseUrl: '' }, creds, { useAuthorizationHeader: true, 
+    const cli = matrix_js_sdk_1.createClient(Object.assign({ baseUrl: 'https://matrix.org', idBaseUrl: '' }, creds, { useAuthorizationHeader: true, 
         // sessionStore: new LevelStore(),
         // store: new IndexedDBStore({
         //     indexedDB: indexedDB,
         //     dbName: 'matrix-search-sync',
         //     localStorage: global.localStorage,
         // }),
-        store: new matrix_js_sdk_2.MatrixInMemoryStore({
+        store: new matrix_js_sdk_1.MatrixInMemoryStore({
             localStorage: global.localStorage,
-        }), sessionStore: new matrix_js_sdk_2.WebStorageSessionStore(global.localStorage) }));
+        }), sessionStore: new matrix_js_sdk_1.WebStorageSessionStore(global.localStorage) }));
     cli.on('event', (event) => {
         if (event.isEncrypted())
             return;

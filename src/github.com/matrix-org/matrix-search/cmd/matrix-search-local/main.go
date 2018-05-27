@@ -81,7 +81,7 @@ func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
 		vs := common.NewStringSet(q.Values)
 
 		switch q.Type {
-		case "mustNot":
+		case "mustnot":
 			qr.AddMustNot(generateQueryList(vs, q.FieldName)...)
 		case "must":
 			qr.AddMust(query.NewDisjunctionQuery(generateQueryList(vs, q.FieldName)))
@@ -117,7 +117,8 @@ func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
 	return sr
 }
 
-func calculateHighlights(hit *search.DocumentMatch, keys []string) (highlights common.StringSet) {
+func calculateHighlights(hit *search.DocumentMatch, keys []string) common.StringSet {
+	highlights := common.StringSet{}
 	for _, key := range keys {
 		if matches, ok := hit.Locations[key]; ok {
 			for match := range matches {
@@ -125,7 +126,7 @@ func calculateHighlights(hit *search.DocumentMatch, keys []string) (highlights c
 			}
 		}
 	}
-	return
+	return highlights
 }
 
 func splitRoomEventIDs(str string) (roomID, eventID string) {
@@ -193,7 +194,7 @@ func main() {
 		}
 
 		sr := req.generateSearchRequest()
-		resp, err := idxr.Query(sr)
+		resp, err := index.Search(sr)
 
 		if err != nil {
 			panic(err)
@@ -218,7 +219,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(res)
-
 	}).Methods("POST")
 
 	fmt.Println("Starting LS")
@@ -226,10 +226,4 @@ func main() {
 	// start the HTTP server
 	http.Handle("/", router)
 	log.Fatal(http.ListenAndServe(":9999", nil))
-
-	// clientapi.RegisterLocalHandler(r, idxr, conf)
-	//
-	// go clientapi.RegisterSyncer(idxr, conf)
-	//
-	// common.Begin(r, conf)
 }
