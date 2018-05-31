@@ -12,23 +12,14 @@ import bodyParser from 'body-parser';
 import * as mkdirp from "mkdirp";
 
 import {RequestAPI, RequiredUriUrl} from "request";
-import sqlite3 from 'sqlite3';
+// import sqlite3 from 'sqlite3';
 
-const indexeddbjs = require('indexeddb-js');
+// const indexeddbjs = require('indexeddb-js');
 const Queue = require('better-queue');
 const SqliteStore = require('better-queue-sqlite');
 const request = require('request-promise');
 
-// process.on('unhandledRejection', (reason, p) => {
-//     console.log("Unhandled at : Promise", p, "reason:", reason);
-    // console.log(reason.stack);
-// });
-
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
-// import StubStore from 'matrix-js-sdk/src/store/stub.js';
-
-// import * as LevelStore from './level-store';
-// import * as Promise from 'bluebird';
 
 // create directory which will house the 3 stores.
 mkdirp.sync('./store');
@@ -56,14 +47,17 @@ import {
 
 const utils = require('matrix-js-sdk/src/utils');
 
-const engine = new sqlite3.Database('./store/indexedb.sqlite');
-const scope = indexeddbjs.makeScope('sqlite3', engine);
-const indexedDB = scope.indexedDB;
+let indexedDB
+
+// const engine = new sqlite3.Database('./store/indexedb.sqlite');
+// const scope = indexeddbjs.makeScope('sqlite3', engine);
+// indexedDB = scope.indexedDB;
 
 if (indexedDB) {
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(indexedDB, 'matrix-js-sdk:crypto'));
-    setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
     // setCryptoStoreFactory(() => new IndexedDBCryptoStore(null));
+} else {
+    setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 }
 
 
@@ -85,19 +79,20 @@ class BleveHttp {
         });
     }
 
-    index(events: MatrixEvent[]) {
+    index(events: Event[]) {
         return this.request({
             url: 'index',
             method: 'PUT',
             json: true,
-            body: events.map(ev => ev.event),
+            body: events,
         });
     }
 }
 
 const b = new BleveHttp("http://localhost:9999/api/");
 
-const q = new Queue(async (batch: MatrixEvent[], cb) => {
+const q = new Queue(async (batch: Event[], cb) => {
+    console.log(batch);
     try {
         cb(null, await b.index(batch));
     } catch (e) {
@@ -112,8 +107,8 @@ const q = new Queue(async (batch: MatrixEvent[], cb) => {
     }),
     filter: (event: MatrixEvent, cb) => {
         if (event.getType() !== 'm.room.message') return cb('not m.room.message');
-        console.log("Enqueue event: ", event.getId());
-        return cb(null, event);
+        console.log("Enqueue event: ", event.getRoomId(), event.getId());
+        return cb(null, event.event);
     }
 });
 
@@ -216,40 +211,18 @@ class Batch {
     }
 }
 
-enum QueryType {
-    Must = 'must',
-    MustNot = 'mustnot',
+interface Query {
+    must: Map<string, Array<string>>;
+    mustNot: Map<string, Array<string>>;
 }
 
-class Query {
-    fieldName: string;
-    type: QueryType;
-    values: Array<string>;
-
-    constructor(fieldName: string, type: QueryType, values: Set<string>) {
-        this.fieldName = fieldName;
-        this.type = type;
-        this.values = Array.from(values);
-    }
-}
-
-class BleveRequest {
+interface BleveRequest {
     keys: Array<string>;
-    filter: Array<Query>;
+    filter: Query;
     sortBy: SearchOrder;
     searchTerm: string;
     from: number;
     size: number;
-
-
-    constructor(keys: Array<string>, filter: Array<Query>, orderBy: SearchOrder, searchTerm: string, from: number, size: number) {
-        this.keys = keys;
-        this.filter = filter;
-        this.sortBy = orderBy;
-        this.searchTerm = searchTerm;
-        this.from = from;
-        this.size = size;
-    }
 }
 
 const pageSize = 10;
@@ -365,32 +338,40 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, orderBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>|null> {
-        const queries: Array<Query> = [];
+    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>|null> {
+        const filter: Query = {
+            mustNot: new Map(),
+            must: new Map(),
+        };
 
         // must satisfy room_id
         if (searchFilter.rooms.size > 0)
-            queries.push(new Query('room_id', QueryType.Must, searchFilter.rooms));
-
-        // must satisfy !room_id
+            filter.must.set('room_id', [...searchFilter.rooms]);
         if (searchFilter.notRooms.size > 0)
-            queries.push(new Query('room_id', QueryType.MustNot, searchFilter.notRooms));
+            filter.mustNot.set('room_id', [...searchFilter.notRooms]);
 
         // must satisfy sender
         if (searchFilter.senders.size > 0)
-            queries.push(new Query('sender', QueryType.Must, searchFilter.senders));
-        // must satisfy !sender
+            filter.must.set('sender', [...searchFilter.senders]);
         if (searchFilter.notSenders.size > 0)
-            queries.push(new Query('sender', QueryType.MustNot, searchFilter.notSenders));
+            filter.mustNot.set('sender', [...searchFilter.notSenders]);
 
         // must satisfy type
         if (searchFilter.types.size > 0)
-            queries.push(new Query('type', QueryType.Must, searchFilter.types));
-        // must satisfy !type
+            filter.must.set('type', [...searchFilter.types]);
         if (searchFilter.notTypes.size > 0)
-            queries.push(new Query('type', QueryType.MustNot, searchFilter.notTypes));
+            filter.mustNot.set('type', [...searchFilter.notTypes]);
 
-        const r = new BleveRequest(keys, queries, orderBy, searchTerm, from, pageSize);
+        const r: BleveRequest = {
+            from,
+            keys,
+            filter,
+            sortBy,
+            searchTerm,
+            size: pageSize,
+        };
+
+        // const r = new BleveRequest(keys, filter, orderBy, searchTerm, from, pageSize);
         console.log(JSON.stringify(r));
 
         const resp = await b.search(r);

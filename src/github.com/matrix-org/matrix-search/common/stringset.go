@@ -1,8 +1,6 @@
 package common
 
-import (
-	"github.com/gin-gonic/gin/json"
-)
+import "encoding/json"
 
 type StringSet map[string]struct{}
 
@@ -49,6 +47,29 @@ func (ss StringSet) ToArray() []string {
 
 func (ss StringSet) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ss.ToArray())
+}
+
+// auto packs string into Set<string>(string) or Set<string>(...string)
+func (ss *StringSet) UnmarshalJSON(b []byte) error {
+	if b[0] == '[' {
+		var s []string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+
+		*ss = StringSet{}
+		ss.AddStrings(s)
+		return nil
+	}
+
+	// auto pack string into Set
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*ss = StringSet{}
+	ss.AddString(s)
+	return nil
 }
 
 func NewStringSet(str []string) StringSet {

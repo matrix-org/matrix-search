@@ -16,19 +16,17 @@ import (
 	"time"
 )
 
-type QueryFilter struct {
-	FieldName string   `json:"fieldName"`
-	Type      string   `json:"type"`
-	Values    []string `json:"values"`
-}
-
 type QueryRequest struct {
-	Keys       []string      `json:"keys"`
-	Filter     []QueryFilter `json:"filter"`
-	SortBy     string        `json:"sortBy"`
-	SearchTerm string        `json:"searchTerm"`
-	From       int           `json:"from"`
-	Size       int           `json:"size"`
+	Keys   []string `json:"keys"`
+	Filter struct {
+		Must    map[string]common.StringSet `json:"must"`    // all of must
+		Should  map[string]common.StringSet `json:"should"`  // any of should
+		MustNot map[string]common.StringSet `json:"mustNot"` // any of must not
+	} `json:"filter"`
+	SortBy     string `json:"sortBy"`
+	SearchTerm string `json:"searchTerm"`
+	From       int    `json:"from"`
+	Size       int    `json:"size"`
 }
 
 type ResponseRow struct {
@@ -48,12 +46,6 @@ func (req *QueryRequest) Valid() bool {
 		return false
 	}
 
-	for _, q := range req.Filter {
-		if q.Type != "must" && q.Type != "mustnot" {
-			return false
-		}
-	}
-
 	return true
 }
 
@@ -61,7 +53,7 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 	if size := len(filterSet); size > 0 {
 		queries := make([]query.Query, 0, size)
 		for k := range filterSet {
-			qr := query.NewTermQuery(k)
+			qr := query.NewMatchQuery(k)
 			qr.SetField(fieldName)
 			queries = append(queries, qr)
 		}
@@ -73,23 +65,24 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
 	qr := bleve.NewBooleanQuery()
 
-	for _, q := range req.Filter {
-		if len(q.Values) < 1 {
-			continue
+	for fieldName, values := range req.Filter.Must {
+		if len(values) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(generateQueryList(values, fieldName))) // must have one of the values for field
 		}
-
-		vs := common.NewStringSet(q.Values)
-
-		switch q.Type {
-		case "mustnot":
-			qr.AddMustNot(generateQueryList(vs, q.FieldName)...)
-		case "must":
-			qr.AddMust(query.NewDisjunctionQuery(generateQueryList(vs, q.FieldName)))
+	}
+	for fieldName, values := range req.Filter.Should {
+		if len(values) > 0 {
+			qr.AddShould(generateQueryList(values, fieldName)...)
+		}
+	}
+	for fieldName, values := range req.Filter.MustNot {
+		if len(values) > 0 {
+			qr.AddMustNot(generateQueryList(values, fieldName)...)
 		}
 	}
 
-	// The user-entered query string
-	if len(req.Keys) > 0 {
+	//The user-entered query string
+	if len(req.Keys) > 0 && req.SearchTerm != "" {
 		oneOf := query.NewDisjunctionQuery(nil)
 		for _, key := range req.Keys {
 			qrs := query.NewMatchQuery(strings.ToLower(req.SearchTerm))
@@ -97,8 +90,6 @@ func (req *QueryRequest) generateSearchRequest() *bleve.SearchRequest {
 			oneOf.AddQuery(qrs)
 		}
 		qr.AddMust(oneOf)
-	} else {
-		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(req.SearchTerm)))
 	}
 
 	sr := bleve.NewSearchRequestOptions(qr, req.Size, req.From, false)
@@ -176,9 +167,14 @@ func main() {
 			// TODO handle err from AddEvent and bail txn processing
 
 			err = index.Index(fmt.Sprintf("%s/%s", ev.RoomID, ev.ID), iev)
-			fmt.Println(err)
-			log.Println(ev)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				log.Println(ev)
+			}
 		}
+
+		w.WriteHeader(http.StatusOK)
 	}).Methods("PUT")
 
 	router.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
