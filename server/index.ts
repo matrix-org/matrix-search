@@ -47,7 +47,7 @@ import {
 
 const utils = require('matrix-js-sdk/src/utils');
 
-let indexedDB
+let indexedDB;
 
 // const engine = new sqlite3.Database('./store/indexedb.sqlite');
 // const scope = indexeddbjs.makeScope('sqlite3', engine);
@@ -107,9 +107,16 @@ const q = new Queue(async (batch: Event[], cb) => {
     }),
     filter: (event: MatrixEvent, cb) => {
         if (event.getType() !== 'm.room.message') return cb('not m.room.message');
-        console.log("Enqueue event: ", event.getRoomId(), event.getId());
         return cb(null, event.event);
     }
+});
+
+q.on('task_accepted', function(taskId: string, ev: Event) {
+    console.info(`Enqueue event ${ev.room_id}/${ev.event_id} ${ev.sender} [${ev.type}] (${taskId})`);
+});
+
+q.on('batch_failed', function(err) {
+    console.error("[ERROR] Batch failed: ", err);
 });
 
 setup().then(console.log).catch(console.error);
@@ -127,39 +134,6 @@ Set.prototype.intersect = function<T>(s: Set<T>): Set<T> {
 Set.prototype.union = function<T>(s: Set<T>): Set<T> {
     return new Set<T>([...this, ...s]);
 };
-
-class Filter {
-    rooms: Set<string>;
-    notRooms: Set<string>;
-    senders: Set<string>;
-    notSenders: Set<string>;
-    types: Set<string>;
-    notTypes: Set<string>;
-    limit: number;
-    containsURL: boolean | undefined;
-
-    constructor(o: object) {
-        this.rooms = new Set<string>(o['rooms']);
-        this.notRooms = new Set<string>(o['not_rooms']);
-        this.senders = new Set<string>(o['senders']);
-        this.notSenders = new Set<string>(o['not_senders']);
-        this.types = new Set<string>(o['types']);
-        this.notTypes = new Set<string>(o['not_types']);
-
-        this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
-        this.containsURL = o['contains_url'];
-    }
-}
-
-class Result {
-    public rank: number;
-    public event: MatrixEvent;
-
-    constructor(event: MatrixEvent, rank: number) {
-        this.event = event;
-        this.rank = rank;
-    }
-}
 
 class GroupValue {
     public order: number|undefined;
@@ -254,6 +228,12 @@ interface EventLookupResult {
     highlights: Set<string>;
 }
 
+interface Result {
+    rows: Array<BleveResponseRow>;
+    lookup: Array<EventLookupResult>;
+    total: number;
+}
+
 MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: string): Promise<MatrixEvent> {
     const path = utils.encodeUri('/rooms/$roomId/event/$eventId', {
         $roomId: roomId,
@@ -317,7 +297,7 @@ class Search {
     }
 
     // impedance matching.
-    async resolveOne(roomId: string, eventId: string, context: boolean): Promise<EventWithContext> {
+    async resolveOne(roomId: string, eventId: string, context?: RequestEventContext): Promise<EventWithContext> {
         if (context)
             return await this.cli.fetchEventContext(roomId, eventId);
 
@@ -327,7 +307,7 @@ class Search {
     }
 
     // keep context as a map, so the whole thing can just be nulled.
-    async resolve(rows: Array<BleveResponseRow>, context: boolean): Promise<Array<EventLookupResult>> {
+    async resolve(rows: Array<BleveResponseRow>, context?: RequestEventContext): Promise<Array<EventLookupResult>> {
         return [];
     }
 
@@ -338,7 +318,7 @@ class Search {
     // searchTerm: pass straight through to go-bleve
     // from: pass straight through to go-bleve
     // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context: boolean): Promise<Array<EventLookupResult>|null> {
+    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<Result> {
         const filter: Query = {
             mustNot: new Map(),
             must: new Map(),
@@ -371,13 +351,12 @@ class Search {
             size: pageSize,
         };
 
-        // const r = new BleveRequest(keys, filter, orderBy, searchTerm, from, pageSize);
-        console.log(JSON.stringify(r));
-
-        const resp = await b.search(r);
-        console.log("DEBUG: ", resp);
-
-        return null;
+        const resp: BleveResponse = await b.search(r);
+        return {
+            rows: resp.rows,
+            lookup: await this.resolve(resp.rows, context),
+            total: resp.total,
+        };
     }
 }
 
@@ -487,18 +466,19 @@ async function setup() {
 
         // verify that user is allowed to access this thing
         try {
-            const roomCat = req.body['search_categories']['room_events'];
+            const castBody: MatrixSearchRequest = req.body;
+            const roomCat = castBody.search_categories.room_events;
 
-            let keys = ['content.body', 'content.name', 'content.topic'];
-            if ('keys' in roomCat && roomCat.keys.length) keys = roomCat.keys
+            let keys = ['content.body', 'content.name', 'content.topic']; // default vaue for roomCat.key
+            if (roomCat.keys && roomCat.keys.length) keys = roomCat.keys;
 
             const includeState = Boolean(roomCat['include_state']);
             const eventContext = roomCat['event_context'];
 
             let groupByRoomId = false;
             let groupBySender = false;
-            if ('groupings' in roomCat) {
-                roomCat.groupings.forEach(grouping => {
+            if (roomCat.groupings && roomCat.groupings.group_by) {
+                roomCat.groupings.group_by.forEach(grouping => {
                     switch (grouping.key) {
                         case 'room_id':
                             groupByRoomId = true;
@@ -512,7 +492,7 @@ async function setup() {
 
             let highlights: Array<string> = [];
 
-            const searchFilter = new Filter(roomCat.filter);
+            const searchFilter = new Filter(roomCat.filter || {}); // default to empty object to assume defaults
 
             const joinedRooms = cli.getRooms();
             const roomIds = joinedRooms.map((room: Room) => room.roomId);
@@ -555,17 +535,19 @@ async function setup() {
             const search = new Search(cli);
             const searchTerm = roomCat['search_term'];
 
+            let result: Result;
+
             // TODO extend local event map using sqlite/leveldb
             switch (roomCat['order_by']) {
                 case 'rank':
                 case '':
                     // get messages from Bleve by rank // resolve them locally
-                    search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
+                    result = await search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
                     break;
 
                 case 'recent':
                     const from = nextBatch !== null ? nextBatch.from() : 0;
-                    search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
+                    result = await search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
                     // TODO get next back here
                     break;
 
@@ -586,6 +568,13 @@ async function setup() {
                 });
                 return;
             }
+
+            // const highlightsSuperset = new Set<string>();
+            // resp.rows.forEach((row: BleveResponseRow) => {
+            //     row.highlights.forEach((highlight: string) => {
+            //         highlightsSuperset.add(highlight);
+            //     });
+            // });
 
             allowedEvents.forEach((evId: string) => {
                 const res = eventMap[evId];
@@ -659,4 +648,68 @@ async function setup() {
     app.listen(port, () => {
         console.log('We are live on ' + port);
     });
+}
+
+class Filter {
+    rooms: Set<string>;
+    notRooms: Set<string>;
+    senders: Set<string>;
+    notSenders: Set<string>;
+    types: Set<string>;
+    notTypes: Set<string>;
+    limit: number;
+    containsURL: boolean | undefined;
+
+    constructor(o: object) {
+        this.rooms = new Set<string>(o['rooms']);
+        this.notRooms = new Set<string>(o['not_rooms']);
+        this.senders = new Set<string>(o['senders']);
+        this.notSenders = new Set<string>(o['not_senders']);
+        this.types = new Set<string>(o['types']);
+        this.notTypes = new Set<string>(o['not_types']);
+
+        this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
+        this.containsURL = o['contains_url'];
+    }
+}
+
+interface RequestEventContext {
+    before_limit?: number;
+    after_limit?: number;
+    include_profile: boolean;
+}
+
+enum RequestGroupKey {
+    roomId = "room_id",
+    sender = "sender",
+}
+
+interface RequestGroup {
+    key: RequestGroupKey;
+}
+
+interface RequestGroups {
+    group_by?: Array<RequestGroup>;
+}
+
+enum RequestKey {
+    body = "content.body",
+    name = "content.name",
+    topic = "content.topic",
+}
+
+interface MatrixSearchRequestBody {
+    search_term: string;
+    keys?: Array<RequestKey>;
+    filter?: object; // this gets upconverted to an instance of Filter
+    order_by?: string;
+    event_context?: RequestEventContext;
+    includeState?: boolean;
+    groupings?: RequestGroups;
+}
+
+interface MatrixSearchRequest {
+    search_categories: {
+        room_events: MatrixSearchRequestBody;
+    }
 }
