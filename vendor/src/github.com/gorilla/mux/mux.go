@@ -13,8 +13,11 @@ import (
 )
 
 var (
+	// ErrMethodMismatch is returned when the method in the request does not match
+	// the method defined against the route.
 	ErrMethodMismatch = errors.New("method is not allowed")
-	ErrNotFound       = errors.New("no matching route was found")
+	// ErrNotFound is returned when no route match is found.
+	ErrNotFound = errors.New("no matching route was found")
 )
 
 // NewRouter returns a new router instance.
@@ -63,6 +66,8 @@ type Router struct {
 	KeepContext bool
 	// see Router.UseEncodedPath(). This defines a flag for all routes.
 	useEncodedPath bool
+	// Slice of middlewares to be called after a match is found
+	middlewares []middleware
 }
 
 // Match attempts to match the given request against the router's registered routes.
@@ -79,6 +84,12 @@ type Router struct {
 func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 	for _, route := range r.routes {
 		if route.Match(req, match) {
+			// Build middleware chain if no error was found
+			if match.MatchErr == nil {
+				for i := len(r.middlewares) - 1; i >= 0; i-- {
+					match.Handler = r.middlewares[i].Middleware(match.Handler)
+				}
+			}
 			return true
 		}
 	}
@@ -87,9 +98,9 @@ func (r *Router) Match(req *http.Request, match *RouteMatch) bool {
 		if r.MethodNotAllowedHandler != nil {
 			match.Handler = r.MethodNotAllowedHandler
 			return true
-		} else {
-			return false
 		}
+
+		return false
 	}
 
 	// Closest match for a router (includes sub-routers)
@@ -147,6 +158,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if !r.KeepContext {
 		defer contextClear(req)
 	}
+
 	handler.ServeHTTP(w, req)
 }
 

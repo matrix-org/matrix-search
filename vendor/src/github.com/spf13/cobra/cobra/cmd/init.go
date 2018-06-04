@@ -65,7 +65,7 @@ Init will not use an existing directory with contents.`,
 		initializeProject(project)
 
 		fmt.Fprintln(cmd.OutOrStdout(), `Your Cobra application is ready at
-`+project.AbsPath()+`.
+`+project.AbsPath()+`
 
 Give it a try by going there and running `+"`go run main.go`."+`
 Add commands to it by running `+"`cobra add [cmdname]`.")
@@ -174,7 +174,7 @@ func Execute() {
 	}
 }
 
-func init() { {{if .viper}}
+func init() { {{- if .viper}}
 	cobra.OnInitialize(initConfig)
 {{end}}
 	// Here you will define your flags and configuration settings.

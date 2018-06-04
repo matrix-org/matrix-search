@@ -13,14 +13,14 @@ import (
 	"time"
 )
 
-func driverWithProcess(t *testing.T) *MssqlDriver {
-	return &MssqlDriver{
+func driverWithProcess(t *testing.T) *Driver {
+	return &Driver{
 		log:              optionalLogger{testLogger{t}},
 		processQueryText: true,
 	}
 }
-func driverNoProcess(t *testing.T) *MssqlDriver {
-	return &MssqlDriver{
+func driverNoProcess(t *testing.T) *Driver {
+	return &Driver{
 		log:              optionalLogger{testLogger{t}},
 		processQueryText: false,
 	}
@@ -809,7 +809,7 @@ func TestIgnoreEmptyResults(t *testing.T) {
 	}
 }
 
-func TestMssqlStmt_SetQueryNotification(t *testing.T) {
+func TestStmt_SetQueryNotification(t *testing.T) {
 	checkConnStr(t)
 	mssqldriver := driverWithProcess(t)
 	cn, err := mssqldriver.Open(makeConnStr(t).String())
@@ -821,7 +821,7 @@ func TestMssqlStmt_SetQueryNotification(t *testing.T) {
 		t.Error("Connection failed", err)
 	}
 
-	sqlstmt := stmt.(*MssqlStmt)
+	sqlstmt := stmt.(*Stmt)
 	sqlstmt.SetQueryNotification("ABC", "service=WebCacheNotifications", time.Hour)
 
 	rows, err := sqlstmt.Query(nil)
@@ -865,15 +865,15 @@ func TestSetLanguage(t *testing.T) {
 }
 
 func TestConnectionClosing(t *testing.T) {
-	conn := open(t)
-	defer conn.Close()
+	pool := open(t)
+	defer pool.Close()
 	for i := 1; i <= 100; i++ {
-		if conn.Stats().OpenConnections > 1 {
-			t.Errorf("Open connections is expected to stay <= 1, but it is %d", conn.Stats().OpenConnections)
+		if pool.Stats().OpenConnections > 1 {
+			t.Errorf("Open connections is expected to stay <= 1, but it is %d", pool.Stats().OpenConnections)
 			return
 		}
 
-		stmt, err := conn.Query("select 1")
+		stmt, err := pool.Query("select 1")
 		if err != nil {
 			t.Fatalf("Query failed with unexpected error %s", err)
 		}
@@ -890,7 +890,7 @@ func TestConnectionClosing(t *testing.T) {
 func TestBeginTranError(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -906,7 +906,7 @@ func TestBeginTranError(t *testing.T) {
 	}
 
 	// reopen connection
-	conn, err = drv.open(makeConnStr(t).String())
+	conn, err = drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -933,7 +933,7 @@ func TestBeginTranError(t *testing.T) {
 func TestCommitTranError(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -949,7 +949,7 @@ func TestCommitTranError(t *testing.T) {
 	}
 
 	// reopen connection
-	conn, err = drv.open(makeConnStr(t).String())
+	conn, err = drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -973,7 +973,7 @@ func TestCommitTranError(t *testing.T) {
 	}
 
 	// reopen connection
-	conn, err = drv.open(makeConnStr(t).String())
+	conn, err = drv.open(context.Background(), makeConnStr(t).String())
 	defer conn.Close()
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
@@ -991,7 +991,7 @@ func TestCommitTranError(t *testing.T) {
 func TestRollbackTranError(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -1007,7 +1007,7 @@ func TestRollbackTranError(t *testing.T) {
 	}
 
 	// reopen connection
-	conn, err = drv.open(makeConnStr(t).String())
+	conn, err = drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestRollbackTranError(t *testing.T) {
 	}
 
 	// reopen connection
-	conn, err = drv.open(makeConnStr(t).String())
+	conn, err = drv.open(context.Background(), makeConnStr(t).String())
 	defer conn.Close()
 	if err != nil {
 		t.Fatalf("Open failed with error %v", err)
@@ -1049,7 +1049,7 @@ func TestRollbackTranError(t *testing.T) {
 func TestSendQueryErrors(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.FailNow()
 	}
@@ -1089,7 +1089,7 @@ func TestSendQueryErrors(t *testing.T) {
 func TestProcessQueryErrors(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.Fatal("open expected to succeed, but it failed with", err)
 	}
@@ -1120,7 +1120,7 @@ func TestProcessQueryErrors(t *testing.T) {
 func TestSendExecErrors(t *testing.T) {
 	checkConnStr(t)
 	drv := driverWithProcess(t)
-	conn, err := drv.open(makeConnStr(t).String())
+	conn, err := drv.open(context.Background(), makeConnStr(t).String())
 	if err != nil {
 		t.FailNow()
 	}
@@ -1154,5 +1154,49 @@ func TestSendExecErrors(t *testing.T) {
 	_, err = stmt.Exec([]driver.Value{int64(1)})
 	if err == nil || stmt.c.connectionGood {
 		t.Fail()
+	}
+}
+
+func TestLongConnection(t *testing.T) {
+	checkConnStr(t)
+
+	list := []struct {
+		connTimeout  string
+		queryTimeout string
+		ctxTimeout   time.Duration
+		wantFail     bool
+	}{
+		{"1", "00:00:02", 6 * time.Second, true},
+		{"2", "00:00:01", 6 * time.Second, false},
+
+		// Check no connection timeout.
+		{"0", "00:00:01", 2 * time.Second, false},
+		// {"0", "00:00:45", 60 * time.Second, false}, // Skip for normal testing to limit time.
+	}
+
+	for i, item := range list {
+		t.Run(fmt.Sprintf("item-index-%d,want-fail=%t", i, item.wantFail), func(t *testing.T) {
+			dsn := makeConnStr(t)
+			dsnParams := dsn.Query()
+			dsnParams.Set("connection timeout", item.connTimeout)
+			dsn.RawQuery = dsnParams.Encode()
+
+			db, err := sql.Open("sqlserver", dsn.String())
+			if err != nil {
+				t.Fatalf("failed to open driver sqlserver")
+			}
+			defer db.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), item.ctxTimeout)
+			defer cancel()
+
+			_, err = db.ExecContext(ctx, "WAITFOR DELAY '"+item.queryTimeout+"';")
+			if item.wantFail && err == nil {
+				t.Fatal("exec no error")
+			}
+			if !item.wantFail && err != nil {
+				t.Fatal("exec error", err)
+			}
+		})
 	}
 }

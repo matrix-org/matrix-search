@@ -134,6 +134,9 @@ var ErrValueTooLarge = errors.New("value-too-large")
 // ErrAborted is returned when any operations are aborted.
 var ErrAborted = errors.New("operation-aborted")
 
+// ErrSegmentCorrupted is returned upon any segment corruptions.
+var ErrSegmentCorrupted = errors.New("segment-corrupted")
+
 // A Collection represents an ordered mapping of key-val entries,
 // where a Collection is snapshot'able and atomically updatable.
 type Collection interface {
@@ -544,10 +547,11 @@ type CollectionStats struct {
 	TotCloseLowerLevelEnd uint64
 	TotCloseEnd           uint64
 
-	TotSnapshotBeg         uint64
-	TotSnapshotInternalBeg uint64
-	TotSnapshotInternalEnd uint64
-	TotSnapshotEnd         uint64
+	TotSnapshotBeg           uint64
+	TotSnapshotEnd           uint64
+	TotSnapshotInternalBeg   uint64
+	TotSnapshotInternalEnd   uint64
+	TotSnapshotInternalClose uint64
 
 	TotGet    uint64
 	TotGetErr uint64

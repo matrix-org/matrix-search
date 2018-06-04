@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,27 +37,20 @@ func init() {
 }
 
 func OpenTestConnection() (db *gorm.DB, err error) {
+	dbDSN := os.Getenv("GORM_DSN")
 	switch os.Getenv("GORM_DIALECT") {
 	case "mysql":
-		// CREATE USER 'gorm'@'localhost' IDENTIFIED BY 'gorm';
-		// CREATE DATABASE gorm;
-		// GRANT ALL ON gorm.* TO 'gorm'@'localhost';
 		fmt.Println("testing mysql...")
-		dbhost := os.Getenv("GORM_DBADDRESS")
-		if dbhost != "" {
-			dbhost = fmt.Sprintf("tcp(%v)", dbhost)
+		if dbDSN == "" {
+			dbDSN = "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True"
 		}
-		db, err = gorm.Open("mysql", fmt.Sprintf("gorm:gorm@%v/gorm?charset=utf8&parseTime=True", dbhost))
+		db, err = gorm.Open("mysql", dbDSN)
 	case "postgres":
 		fmt.Println("testing postgres...")
-		dbhost := os.Getenv("GORM_DBHOST")
-		if dbhost != "" {
-			dbhost = fmt.Sprintf("host=%v ", dbhost)
+		if dbDSN == "" {
+			dbDSN = "user=gorm password=gorm DB.name=gorm port=9920 sslmode=disable"
 		}
-		db, err = gorm.Open("postgres", fmt.Sprintf("%vuser=gorm password=gorm DB.name=gorm sslmode=disable", dbhost))
-	case "foundation":
-		fmt.Println("testing foundation...")
-		db, err = gorm.Open("foundation", "dbname=gorm port=15432 sslmode=disable")
+		db, err = gorm.Open("postgres", dbDSN)
 	case "mssql":
 		// CREATE LOGIN gorm WITH PASSWORD = 'LoremIpsum86';
 		// CREATE DATABASE gorm;
@@ -64,7 +58,10 @@ func OpenTestConnection() (db *gorm.DB, err error) {
 		// CREATE USER gorm FROM LOGIN gorm;
 		// sp_changedbowner 'gorm';
 		fmt.Println("testing mssql...")
-		db, err = gorm.Open("mssql", "sqlserver://gorm:LoremIpsum86@localhost:1433?database=gorm")
+		if dbDSN == "" {
+			dbDSN = "sqlserver://gorm:LoremIpsum86@localhost:9930?database=gorm"
+		}
+		db, err = gorm.Open("mssql", dbDSN)
 	default:
 		fmt.Println("testing sqlite3...")
 		db, err = gorm.Open("sqlite3", filepath.Join(os.TempDir(), "gorm.db"))
@@ -72,13 +69,31 @@ func OpenTestConnection() (db *gorm.DB, err error) {
 
 	// db.SetLogger(Logger{log.New(os.Stdout, "\r\n", 0)})
 	// db.SetLogger(log.New(os.Stdout, "\r\n", 0))
-	if os.Getenv("DEBUG") == "true" {
+	if debug := os.Getenv("DEBUG"); debug == "true" {
 		db.LogMode(true)
+	} else if debug == "false" {
+		db.LogMode(false)
 	}
 
 	db.DB().SetMaxIdleConns(10)
 
 	return
+}
+
+func TestOpen_ReturnsError_WithBadArgs(t *testing.T) {
+	stringRef := "foo"
+	testCases := []interface{}{42, time.Now(), &stringRef}
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("%v", tc), func(t *testing.T) {
+			_, err := gorm.Open("postgresql", tc)
+			if err == nil {
+				t.Error("Should got error with invalid database source")
+			}
+			if !strings.HasPrefix(err.Error(), "invalid database source:") {
+				t.Errorf("Should got error starting with \"invalid database source:\", but got %q", err.Error())
+			}
+		})
+	}
 }
 
 func TestStringPrimaryKey(t *testing.T) {
@@ -630,6 +645,47 @@ func TestQueryBuilderSubselectInWhere(t *testing.T) {
 
 	if len(users) != 2 {
 		t.Errorf("Two users should be found, instead found %d", len(users))
+	}
+}
+
+func TestQueryBuilderRawQueryWithSubquery(t *testing.T) {
+	user := User{Name: "subquery_test_user1", Age: 10}
+	DB.Save(&user)
+	user = User{Name: "subquery_test_user2", Age: 11}
+	DB.Save(&user)
+	user = User{Name: "subquery_test_user3", Age: 12}
+	DB.Save(&user)
+
+	var count int
+	err := DB.Raw("select count(*) from (?) tmp",
+		DB.Table("users").
+			Select("name").
+			Where("age >= ? and name in (?)", 10, []string{"subquery_test_user1", "subquery_test_user2"}).
+			Group("name").
+			QueryExpr(),
+	).Count(&count).Error
+
+	if err != nil {
+		t.Errorf("Expected to get no errors, but got %v", err)
+	}
+	if count != 2 {
+		t.Errorf("Row count must be 2, instead got %d", count)
+	}
+
+	err = DB.Raw("select count(*) from (?) tmp",
+		DB.Table("users").
+			Select("name").
+			Where("name LIKE ?", "subquery_test%").
+			Not("age <= ?", 10).Not("name in (?)", []string{"subquery_test_user1", "subquery_test_user2"}).
+			Group("name").
+			QueryExpr(),
+	).Count(&count).Error
+
+	if err != nil {
+		t.Errorf("Expected to get no errors, but got %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Row count must be 1, instead got %d", count)
 	}
 }
 

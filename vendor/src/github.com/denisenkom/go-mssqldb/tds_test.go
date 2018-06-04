@@ -2,6 +2,7 @@ package mssql
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -9,8 +10,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"golang.org/x/net/context"
 )
 
 type MockTransport struct {
@@ -79,7 +78,7 @@ func TestSendSqlBatch(t *testing.T) {
 		return
 	}
 
-	conn, err := connect(optionalLogger{testLogger{t}}, p)
+	conn, err := connect(context.Background(), optionalLogger{testLogger{t}}, p)
 	if err != nil {
 		t.Error("Open connection failed:", err.Error())
 		return
@@ -90,7 +89,7 @@ func TestSendSqlBatch(t *testing.T) {
 		{hdrtype: dataStmHdrTransDescr,
 			data: transDescrHdr{0, 1}.pack()},
 	}
-	err = sendSqlBatch72(conn.buf, "select 1", headers)
+	err = sendSqlBatch72(conn.buf, "select 1", headers, true)
 	if err != nil {
 		t.Error("Sending sql batch failed", err.Error())
 		return

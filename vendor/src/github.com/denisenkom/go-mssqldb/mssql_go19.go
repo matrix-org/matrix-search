@@ -9,9 +9,19 @@ import (
 	// "github.com/cockroachdb/apd"
 )
 
-var _ driver.NamedValueChecker = &MssqlConn{}
+// Type alias provided for compibility.
 
-func (c *MssqlConn) CheckNamedValue(nv *driver.NamedValue) error {
+type MssqlDriver = Driver           // Deprecated: users should transition to the new name when possible.
+type MssqlBulk = Bulk               // Deprecated: users should transition to the new name when possible.
+type MssqlBulkOptions = BulkOptions // Deprecated: users should transition to the new name when possible.
+type MssqlConn = Conn               // Deprecated: users should transition to the new name when possible.
+type MssqlResult = Result           // Deprecated: users should transition to the new name when possible.
+type MssqlRows = Rows               // Deprecated: users should transition to the new name when possible.
+type MssqlStmt = Stmt               // Deprecated: users should transition to the new name when possible.
+
+var _ driver.NamedValueChecker = &Conn{}
+
+func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
 	switch v := nv.Value.(type) {
 	case sql.Out:
 		if c.outs == nil {
@@ -34,6 +44,8 @@ func (c *MssqlConn) CheckNamedValue(nv *driver.NamedValue) error {
 		}
 		nv.Value = sql.Out{Dest: lnv.Value}
 		return nil
+	case VarChar:
+		return nil
 	// case *apd.Decimal:
 	// 	return nil
 	default:
@@ -41,7 +53,7 @@ func (c *MssqlConn) CheckNamedValue(nv *driver.NamedValue) error {
 	}
 }
 
-func (s *MssqlStmt) makeParamExtra(val driver.Value) (res Param, err error) {
+func (s *Stmt) makeParamExtra(val driver.Value) (res param, err error) {
 	switch val := val.(type) {
 	case sql.Out:
 		res, err = s.makeParam(val.Dest)

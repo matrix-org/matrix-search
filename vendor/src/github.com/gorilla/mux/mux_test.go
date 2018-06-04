@@ -25,7 +25,7 @@ func (r *Route) GoString() string {
 }
 
 func (r *routeRegexp) GoString() string {
-	return fmt.Sprintf("&routeRegexp{template: %q, matchHost: %t, matchQuery: %t, strictSlash: %t, regexp: regexp.MustCompile(%q), reverse: %q, varsN: %v, varsR: %v", r.template, r.matchHost, r.matchQuery, r.strictSlash, r.regexp.String(), r.reverse, r.varsN, r.varsR)
+	return fmt.Sprintf("&routeRegexp{template: %q, regexpType: %v, options: %v, regexp: regexp.MustCompile(%q), reverse: %q, varsN: %v, varsR: %v", r.template, r.regexpType, r.options, r.regexp.String(), r.reverse, r.varsN, r.varsR)
 }
 
 type routeTest struct {
@@ -2248,6 +2248,15 @@ func TestMethodsSubrouterPathVariable(t *testing.T) {
 	}
 }
 
+func ExampleSetURLVars() {
+	req, _ := http.NewRequest("GET", "/foo", nil)
+	req = SetURLVars(req, map[string]string{"foo": "bar"})
+
+	fmt.Println(Vars(req)["foo"])
+
+	// Output: bar
+}
+
 // testMethodsSubrouter runs an individual methodsSubrouterTest.
 func testMethodsSubrouter(t *testing.T, test methodsSubrouterTest) {
 	// Execute request
@@ -2304,6 +2313,14 @@ func stringMapEqual(m1, m2 map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// stringHandler returns a handler func that writes a message 's' to the
+// http.ResponseWriter.
+func stringHandler(s string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(s))
+	}
 }
 
 // newRequest is a helper function to create a new request with a method and url.

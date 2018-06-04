@@ -1,0 +1,41 @@
+.*.swp
+.idea
+
+# Compiled Object files, Static and Dynamic libs (Shared Objects)
+*.o
+*.a
+*.so
+
+# Folders
+/bleve
+/bin
+/pkg
+/_obj
+/_test
+/vendor/bin
+
+# Architecture specific extensions/prefixes
+*.[568vq]
+[568vq].out
+
+*.cgo1.go
+*.cgo2.c
+_cgo_defun.c
+_cgo_gotypes.go
+_cgo_export.*
+
+_testmain.go
+
+*.exe
+*.test
+*.prof
+
+my_registration_file.yaml
+config.yaml
+passwords.txt
+persist.json
+node_modules/
+server/queue
+server/store.sqlite
+server/store/
+vendor/pkg/

@@ -15,6 +15,7 @@
 package bleve
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -28,8 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/context"
-
 	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
 	"github.com/blevesearch/bleve/document"
 	"github.com/blevesearch/bleve/index"
@@ -37,6 +36,9 @@ import (
 	"github.com/blevesearch/bleve/mapping"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
+
+	"github.com/blevesearch/bleve/index/scorch"
+	"github.com/blevesearch/bleve/index/upsidedown"
 )
 
 func TestCrud(t *testing.T) {
@@ -674,16 +676,19 @@ func TestIndexMetadataRaceBug198(t *testing.T) {
 		}
 	}()
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	done := make(chan struct{})
 	go func() {
 		for {
 			select {
 			case <-done:
+				wg.Done()
 				return
 			default:
-				_, err := index.DocCount()
-				if err != nil {
-					t.Fatal(err)
+				_, err2 := index.DocCount()
+				if err2 != nil {
+					t.Fatal(err2)
 				}
 			}
 		}
@@ -701,6 +706,7 @@ func TestIndexMetadataRaceBug198(t *testing.T) {
 		}
 	}
 	close(done)
+	wg.Wait()
 }
 
 func TestSortMatchSearch(t *testing.T) {
@@ -1504,7 +1510,8 @@ func TestSearchTimeout(t *testing.T) {
 	}()
 
 	// first run a search with an absurdly long timeout (should succeeed)
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	query := NewTermQuery("water")
 	req := NewSearchRequest(query)
 	_, err = index.SearchInContext(ctx, req)
@@ -1513,7 +1520,8 @@ func TestSearchTimeout(t *testing.T) {
 	}
 
 	// now run a search again with an absurdly low timeout (should timeout)
-	ctx, _ = context.WithTimeout(context.Background(), 1*time.Microsecond)
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Microsecond)
+	defer cancel()
 	sq := &slowQuery{
 		actual: query,
 		delay:  50 * time.Millisecond, // on Windows timer resolution is 15ms
@@ -1525,7 +1533,7 @@ func TestSearchTimeout(t *testing.T) {
 	}
 
 	// now run a search with a long timeout, but with a long query, and cancel it
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	sq = &slowQuery{
 		actual: query,
 		delay:  100 * time.Millisecond, // on Windows timer resolution is 15ms
@@ -1561,6 +1569,12 @@ func TestBatchRaceBug260(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		err := i.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
 	b := i.NewBatch()
 	err = b.Index("1", 1)
 	if err != nil {
@@ -1802,5 +1816,104 @@ func TestIndexAdvancedCountMatchSearch(t *testing.T) {
 	err = index.Close()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func benchmarkSearchOverhead(indexType string, b *testing.B) {
+	defer func() {
+		err := os.RemoveAll("testidx")
+		if err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	index, err := NewUsing("testidx", NewIndexMapping(),
+		indexType, Config.DefaultKVStore, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		err := index.Close()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	elements := []string{"air", "water", "fire", "earth"}
+	for j := 0; j < 10000; j++ {
+		err = index.Index(fmt.Sprintf("%d", j),
+			map[string]interface{}{"name": elements[j%len(elements)]})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	query1 := NewTermQuery("water")
+	query2 := NewTermQuery("fire")
+	query := NewDisjunctionQuery(query1, query2)
+	req := NewSearchRequest(query)
+
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		_, err = index.Search(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkUpsidedownSearchOverhead(b *testing.B) {
+	benchmarkSearchOverhead(upsidedown.Name, b)
+}
+
+func BenchmarkScorchSearchOverhead(b *testing.B) {
+	benchmarkSearchOverhead(scorch.Name, b)
+}
+
+func TestSearchQueryCallback(t *testing.T) {
+	defer func() {
+		err := os.RemoveAll("testidx")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	index, err := New("testidx", NewIndexMapping())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := index.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	elements := []string{"air", "water", "fire", "earth"}
+	for j := 0; j < 10000; j++ {
+		err = index.Index(fmt.Sprintf("%d", j),
+			map[string]interface{}{"name": elements[j%len(elements)]})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	query := NewTermQuery("water")
+	req := NewSearchRequest(query)
+
+	expErr := fmt.Errorf("MEM_LIMIT_EXCEEDED")
+	f := func(size uint64) error {
+		if size > 1000 {
+			return expErr
+		}
+		return nil
+	}
+
+	ctx := context.WithValue(context.Background(), SearchQueryStartCallbackKey,
+		SearchQueryStartCallbackFn(f))
+	_, err = index.SearchInContext(ctx, req)
+	if err != expErr {
+		t.Fatalf("Expected: %v, Got: %v", expErr, err)
 	}
 }

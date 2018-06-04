@@ -10,6 +10,7 @@ package mysql
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/tls"
 	"database/sql/driver"
 	"encoding/binary"
@@ -209,6 +210,34 @@ func scrambleOldPassword(scramble, password []byte) []byte {
 	}
 
 	return out[:]
+}
+
+// Encrypt password using 8.0 default method
+func scrambleCachingSha2Password(scramble, password []byte) []byte {
+	if len(password) == 0 {
+		return nil
+	}
+
+	// XOR(SHA256(password), SHA256(SHA256(SHA256(password)), scramble))
+
+	crypt := sha256.New()
+	crypt.Write(password)
+	message1 := crypt.Sum(nil)
+
+	crypt.Reset()
+	crypt.Write(message1)
+	message1Hash := crypt.Sum(nil)
+
+	crypt.Reset()
+	crypt.Write(message1Hash)
+	crypt.Write(scramble)
+	message2 := crypt.Sum(nil)
+
+	for i := range message1 {
+		message1[i] ^= message2[i]
+	}
+
+	return message1
 }
 
 /******************************************************************************
@@ -537,7 +566,7 @@ func readLengthEncodedString(b []byte) ([]byte, bool, int, error) {
 
 	// Check data length
 	if len(b) >= n {
-		return b[n-int(num) : n], false, n, nil
+		return b[n-int(num) : n : n], false, n, nil
 	}
 	return nil, false, n, io.EOF
 }
@@ -800,7 +829,7 @@ func (ab *atomicBool) TrySet(value bool) bool {
 	return atomic.SwapUint32(&ab.value, 0) > 0
 }
 
-// atomicBool is a wrapper for atomically accessed error values
+// atomicError is a wrapper for atomically accessed error values
 type atomicError struct {
 	_noCopy noCopy
 	value   atomic.Value

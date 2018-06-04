@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ type User struct {
 	CompanyID         *int
 	Company           Company
 	Role              Role
+	Password          EncryptedData
 	PasswordHash      []byte
 	IgnoreMe          int64                 `sql:"-"`
 	IgnoreStringSlice []string              `sql:"-"`
@@ -116,6 +118,31 @@ type Company struct {
 	Owner *User `sql:"-"`
 }
 
+type EncryptedData []byte
+
+func (data *EncryptedData) Scan(value interface{}) error {
+	if b, ok := value.([]byte); ok {
+		if len(b) < 3 || b[0] != '*' || b[1] != '*' || b[2] != '*' {
+			return errors.New("Too short")
+		}
+
+		*data = b[3:]
+		return nil
+	}
+
+	return errors.New("Bytes expected")
+}
+
+func (data EncryptedData) Value() (driver.Value, error) {
+	if len(data) > 0 && data[0] == 'x' {
+		//needed to test failures
+		return nil, errors.New("Should not start with 'x'")
+	}
+
+	//prepend asterisks
+	return append([]byte("***"), data...), nil
+}
+
 type Role struct {
 	Name string `gorm:"size:256"`
 }
@@ -142,6 +169,8 @@ type Num int64
 func (i *Num) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
+		n, _ := strconv.Atoi(string(s))
+		*i = Num(n)
 	case int64:
 		*i = Num(s)
 	default:
@@ -435,10 +464,7 @@ func TestMultipleIndexes(t *testing.T) {
 }
 
 func TestModifyColumnType(t *testing.T) {
-	dialect := os.Getenv("GORM_DIALECT")
-	if dialect != "postgres" &&
-		dialect != "mysql" &&
-		dialect != "mssql" {
+	if dialect := os.Getenv("GORM_DIALECT"); dialect != "postgres" && dialect != "mysql" && dialect != "mssql" {
 		t.Skip("Skipping this because only postgres, mysql and mssql support altering a column type")
 	}
 

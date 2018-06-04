@@ -7,93 +7,22 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/fatih/set"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
+	"github.com/matrix-org/matrix-search/common"
+	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-type GroupValue struct {
-	NextBatch *string  `json:"next_batch,omitempty"`
-	Order     int      `json:"order,omitempty"`
-	Results   []string `json:"results,omitempty"`
-}
-
-type UserProfile struct {
-	DisplayName string `json:"displayname,omitempty"`
-	AvatarURL   string `json:"avatar_url,omitempty"`
-}
-
-type EventContext struct {
-	Start        string                  `json:"start,omitempty"`
-	End          string                  `json:"end,omitempty"`
-	ProfileInfo  map[string]*UserProfile `json:"profile_info,omitempty"`
-	EventsBefore []*gomatrix.Event       `json:"events_before,omitempty"`
-	EventsAfter  []*gomatrix.Event       `json:"events_after,omitempty"`
-}
-
-type Result struct {
-	Rank    float64         `json:"rank"`
-	Result  *gomatrix.Event `json:"result"`
-	Context *EventContext   `json:"context,omitempty"`
-}
-
-type RoomEventResults struct {
-	Count     int                              `json:"count"`
-	Results   []Result                         `json:"results"`
-	State     map[string][]*gomatrix.Event     `json:"state,omitempty"`
-	Groups    map[string]map[string]GroupValue `json:"groups,omitempty"`
-	NextBatch *string                          `json:"next_batch,omitempty"`
-}
-
-type Categories struct {
-	RoomEvents RoomEventResults `json:"room_events"`
-}
-
-type Results struct {
-	SearchCategories Categories `json:"search_categories"`
-}
-
-type RequestGroup struct {
-	Key string `json:"key"` // room_id/sender
-}
-
-type RequestGroupings struct {
-	GroupBy RequestGroup `json:"group_by"`
-}
-
-type RequestEventContext struct {
-	BeforeLimit    *int `json:"before_limit"`
-	AfterLimit     *int `json:"after_limit"`
-	IncludeProfile bool `json:"include_profile"`
-}
-
-type RequestRoomEvents struct {
-	SearchTerm   string               `json:"search_term"`
-	Keys         []string             `json:"keys"`
-	Filter       gomatrix.FilterPart  `json:"filter"`
-	OrderBy      string               `json:"order_by"`
-	EventContext *RequestEventContext `json:"event_context"`
-	IncludeState bool                 `json:"include_state"`
-	Groupings    []RequestGroupings   `json:"groupings"` // TODO
-}
-
-type RequestCategories struct {
-	RoomEvents RequestRoomEvents `json:"room_events"`
-}
-
-type SearchRequest struct {
-	SearchCategories RequestCategories `json:"search_categories"`
-}
-
-func generateQueryList(filterSet []string, fieldName string) []query.Query {
+func generateQueryList(filterSet common.StringSet, fieldName string) []query.Query {
 	if size := len(filterSet); size > 0 {
 		queries := make([]query.Query, 0, size)
-		for i := range filterSet {
-			qr := query.NewTermQuery(filterSet[i])
+		for k := range filterSet {
+			qr := query.NewTermQuery(k)
 			qr.SetField(fieldName)
 			queries = append(queries, qr)
 		}
@@ -102,7 +31,422 @@ func generateQueryList(filterSet []string, fieldName string) []query.Query {
 	return nil
 }
 
-func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string) (resp interface{}, err error) {
+func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
+	qr := bleve.NewBooleanQuery()
+
+	// Must satisfy room_id
+	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(roomIDs, "room_id")))
+
+	// Must satisfy sender
+	mustSenders := generateQueryList(filter.Senders, "sender")
+	if len(mustSenders) > 0 {
+		qr.AddMust(query.NewDisjunctionQuery(mustSenders))
+	}
+
+	// Must satisfy not sender
+	qr.AddMustNot(generateQueryList(filter.NotSenders, "sender")...)
+
+	// Must satisfy type
+	mustType := generateQueryList(filter.Types, "type")
+	if len(mustType) > 0 {
+		qr.AddMust(query.NewDisjunctionQuery(mustType))
+	}
+
+	// Must satisfy not type
+	qr.AddMustNot(generateQueryList(filter.NotTypes, "type")...)
+
+	// The user-entered query string
+	if len(keys) > 0 {
+		oneOf := query.NewDisjunctionQuery(nil)
+		for _, key := range keys {
+			qrs := query.NewMatchQuery(strings.ToLower(searchTerm))
+			qrs.SetField(key)
+			oneOf.AddQuery(qrs)
+		}
+		qr.AddMust(oneOf)
+	} else {
+		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(searchTerm)))
+	}
+
+	sr := bleve.NewSearchRequestOptions(qr, size, from, false)
+	sr.IncludeLocations = true
+
+	if orderBy == "recent" {
+		//req.SortBy([]string{"-time"})
+		sr.SortByCustom(search.SortOrder{
+			&search.SortField{
+				Field: "time",
+				Desc:  true,
+			},
+		})
+	}
+	resp, err = idxr.Query(sr)
+	return
+}
+
+func splitRoomEventIDs(str string) (roomID, eventID string) {
+	segs := strings.SplitN(str, "/", 2)
+	return segs[0], segs[1]
+}
+
+func glueRoomEventIDs(ev *WrappedEvent) string {
+	return ev.RoomID + "/" + ev.ID
+}
+
+const MAX_SEARCH_RUNS = 3
+
+// TODO sortBy
+func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from int, context *RequestEventContext) (
+	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
+
+	if roomEvMap == nil {
+		roomEvMap = make(map[string]*Result)
+	}
+
+	// set page size to double their limit
+	// iterate minimum number of pages : minimum
+	// iterate minimum + constant      : maximum
+	// always return at maximum
+
+	// from is an int of events not pages
+
+	pageSize := filter.Limit * 2
+	//offset := 0
+
+	beforeLimit := context.BeforeLimit()
+	afterLimit := context.AfterLimit()
+
+	numGotten := 0
+	res = make(search.DocumentMatchCollection, 0, filter.Limit)
+	for i := 0; i < MAX_SEARCH_RUNS; i++ {
+		// If we have reached our target within our search runs, break out of the loop
+		if numGotten >= filter.Limit {
+			break
+		}
+
+		var resp *bleve.SearchResult
+		resp, err = search1(idxr, keys, filter, roomIDs, orderBy, searchTerm, from+(i*pageSize), pageSize)
+		if err != nil {
+			return
+		}
+
+		total = int(resp.Total)
+		numHits := len(resp.Hits)
+
+		tuples := make([]eventTuple, 0, numHits)
+		hitMap := map[string]*search.DocumentMatch{}
+		for _, hit := range resp.Hits {
+			hitMap[hit.ID] = hit
+			roomID, eventID := splitRoomEventIDs(hit.ID)
+			tuples = append(tuples, eventTuple{roomID, eventID})
+		}
+
+		ttt := make([]RespEvGeneric, 0, numHits)
+
+		if context != nil { // wantsContext
+			var ctxs []*RespContext
+			ctxs, err = cli.massResolveEventContext(tuples, beforeLimit, afterLimit)
+			if err != nil {
+				return
+			}
+
+			for _, ctx := range ctxs {
+				context := Context{ctx.Start, ctx.End, ctx.EventsBefore, ctx.EventsAfter, ctx.State}
+				ttt = append(ttt, RespEvGeneric{ctx.Event, &context})
+			}
+		} else {
+			var evs []*WrappedEvent
+			evs, err = cli.massResolveEvent(tuples)
+			if err != nil {
+				return
+			}
+
+			for _, ev := range evs {
+				ttt = append(ttt, RespEvGeneric{ev, nil})
+			}
+		}
+
+		for _, t := range ttt {
+			// If we have reached our target within our search runs, break out of the loop
+			if numGotten >= filter.Limit {
+				break
+			}
+
+			// If event does not match out filter we cannot return it, so it does not count towards the limit.
+			// TODO this is really suboptimal as we can't do it at index-query time...
+			if !filter.filterEv(t.Event) {
+				continue
+			}
+
+			gluedID := glueRoomEventIDs(t.Event)
+			hit := hitMap[gluedID]
+
+			result := t.build(context.IncludeProfile)
+			result.Rank = hit.Score
+			roomEvMap[hit.ID] = result
+
+			res = append(res, hit)
+			numGotten++
+		}
+	}
+
+	// for sanity truncate
+	//res = res[:limit]
+	return
+}
+
+type HTTPError struct {
+	Message string
+	Code    int
+}
+
+func (err *HTTPError) Error() string {
+	return fmt.Sprintf("[%d] %s", err.Code, err.Message)
+}
+
+func getHTTPError(code int) *HTTPError {
+	return &HTTPError{
+		Message: http.StatusText(code),
+		Code:    code,
+	}
+}
+
+func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) (resp *Results, err error) {
+	roomCat := sr.SearchCategories.RoomEvents
+
+	// The actual thing to query in FTS
+	searchTerm := roomCat.SearchTerm
+
+	// Which "keys" to search over in FTS query
+	keys := []string{"content.body", "content.name", "content.topic"}
+	if len(roomCat.Keys) > 0 {
+		keys = roomCat.Keys
+	}
+
+	// Return the current state of the rooms?
+	includeState := roomCat.IncludeState
+
+	// Include context around each event?
+	// TODO
+	eventContext := roomCat.EventContext
+
+	// Group results together? May allow clients to paginate within a group
+	groupByRoomID := roomCat.Groupings.roomID
+	groupBySender := roomCat.Groupings.sender
+
+	// TODO
+	searchFilter := roomCat.Filter // || {}
+	// move filtering logic out to extended filterStruct//
+
+	// TODO: Search through left rooms too.
+	joinedRooms, err := cli.joinedRooms()
+	if err != nil {
+		return
+	}
+
+	roomIDs := joinedRooms.JoinedRooms
+	// Filter room IDs
+	roomIDsSet := roomCat.Filter.filterRooms(roomIDs)
+
+	// TODO WAT
+	if b.isGrouping("room_id") {
+		roomIDsSet.Intersect(common.NewStringSet([]string{*b.GroupKey}))
+	}
+
+	if len(roomIDs) < 1 {
+		resp = &Results{
+			Categories{
+				RoomEventResults{
+					// TODO this is a stub \/
+					Highlights: []string{},
+					Results:    []*Result{},
+					Count:      0,
+				},
+			},
+		}
+		return
+	}
+
+	// TODO do we need this
+	//rankMap := map[string]float64{}
+	//allowedEvents := []*Result{}
+	// TODO these need changing
+	roomGroups := GroupValueMap{}
+	senderGroups := GroupValueMap{}
+
+	// Holds the next_batch for the engine result set if one of those exists
+	// TODO
+	var globalNextBatch *string
+
+	// TODO HIGHLIGHTS
+	//highlights := common.StringSet{}
+
+	// TODO
+	var count int
+
+	var allowedEvents search.DocumentMatchCollection
+	var eventMap map[string]*Result
+
+	rooms := common.StringSet{}
+
+	switch roomCat.OrderBy {
+	case "rank":
+	case "":
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "rank", searchTerm, 0, eventContext)
+		if err != nil {
+			return
+		}
+
+		// so we have a bunch of {rank,eventId} tuples
+		// we need to look them up with Synapse using the Context API,
+		// we need to detect which requests failed due to history permissions, and ignore them
+		// ala `filter_events_for_client`
+
+		// TODO
+		//if len(searchResult.Highlights) > 0 {
+		//	highlights.AddStrings(searchResult.Highlights)
+		//}
+
+		// getting event and filtering must be interleaved otherwise our pages will be too short
+
+		// This is done at search time instead.
+		//eventMap := searchFilter.filter() // TODO
+
+		// SORT?
+
+		// Truncation will be done by the search method
+		// Truncate
+		//allowedEvents = eventMap[:searchFilter.Limit]
+
+	case "recent":
+		from := 0
+		if b.HasToken() {
+			if num, err := strconv.Atoi(*b.Token); err == nil {
+				from = num
+			}
+		}
+
+		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "recent", searchTerm, from, eventContext)
+
+		if len(allowedEvents) >= searchFilter.Limit {
+			// TODO fix this as HitNumber does not work for this purpose :(
+			offset := allowedEvents[len(allowedEvents)-1].HitNumber
+			offsetStr := strconv.Itoa(int(offset))
+
+			if b.isValid() {
+				if t, err := newBatch(*b.Group, *b.GroupKey, offsetStr); err == nil {
+					globalNextBatch = &t
+				}
+			} else {
+				if t, err := newBatch("all", "", offsetStr); err == nil {
+					globalNextBatch = &t
+				}
+			}
+
+			for roomID, group := range roomGroups {
+				if t, err := newBatch("room_id", roomID, offsetStr); err == nil {
+					group.NextBatch = &t
+				}
+			}
+		}
+
+	default:
+		err = getHTTPError(http.StatusNotImplemented)
+		return
+	}
+
+	if len(allowedEvents) < 1 {
+		resp = &Results{
+			Categories{
+				RoomEventResults{
+					Highlights: []string{},
+					Results:    []*Result{},
+					Count:      0,
+				},
+			},
+		}
+		return
+	}
+
+	for _, e := range allowedEvents {
+		res := eventMap[e.ID]
+		ev := res.Result
+
+		if groupByRoomID {
+			roomGroups.add(ev.RoomID, ev.ID, res.Rank)
+		}
+
+		if groupBySender {
+			senderGroups.add(ev.Sender, ev.ID, res.Rank)
+		}
+
+		rooms.AddString(ev.RoomID)
+	}
+
+	// TODO can we do this better than O(n * 3 * m) [O(n^3)]
+	highlights := common.StringSet{}
+	for _, hit := range allowedEvents {
+		for _, key := range keys {
+			if matches, ok := hit.Locations[key]; ok {
+				for match := range matches {
+					highlights.AddString(match)
+				}
+			}
+		}
+	}
+
+	// TODO bunch of stuff
+	// TODO highlights
+
+	roomStateMap := map[string][]*gomatrix.Event{}
+	if includeState {
+		// fetch state from server using API.
+		for roomID := range rooms {
+			var stateEvs []*gomatrix.Event
+			stateEvs, err = cli.latestState(roomID)
+			if err != nil {
+				return
+			}
+			roomStateMap[roomID] = stateEvs
+		}
+	}
+
+	results := make([]*Result, 0, len(allowedEvents))
+	for _, hit := range allowedEvents {
+		results = append(results, eventMap[hit.ID])
+	}
+
+	resp = &Results{
+		Categories{
+			RoomEventResults{
+				Count:      count,
+				Results:    results,
+				State:      roomStateMap,
+				NextBatch:  globalNextBatch,
+				Highlights: highlights.ToArray(),
+			},
+		},
+	}
+
+	// If groupByRoomID/groupBySender attach Groups field in response.
+	if groupByRoomID {
+		if resp.SearchCategories.RoomEvents.Groups == nil {
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]*GroupValue{}
+		}
+		resp.SearchCategories.RoomEvents.Groups["room_id"] = roomGroups
+
+	}
+	if groupBySender {
+		if resp.SearchCategories.RoomEvents.Groups == nil {
+			resp.SearchCategories.RoomEvents.Groups = map[string]map[string]*GroupValue{}
+		}
+		resp.SearchCategories.RoomEvents.Groups["sender"] = senderGroups
+
+	}
+	return
+}
+
+func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *batch) (resp interface{}, err error) {
 	var sr SearchRequest
 	if body == nil {
 		err = errors.New("please send a request body")
@@ -120,178 +464,194 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string) (re
 		return
 	}
 
-	joinedRooms, err := cli.joinedRooms()
-	if err != nil {
-		return
-	}
+	var results *Results
+	results, err = h(cli, &idxr, &sr, b)
 
-	joinedRoomIDsSet := set.NewNonTS()
-	for i := range joinedRooms.JoinedRooms {
-		joinedRoomIDsSet.Add(joinedRooms.JoinedRooms[i])
-	}
-
-	q := sr.SearchCategories.RoomEvents
-
-	wantedRoomIDsSet := set.NewNonTS()
-	for i := range q.Filter.Rooms {
-		wantedRoomIDsSet.Add(q.Filter.Rooms[i])
-	}
-
-	roomIDsSet := set.Intersection(joinedRoomIDsSet, wantedRoomIDsSet)
-
-	for i := range q.Filter.NotRooms {
-		roomIDsSet.Remove(q.Filter.NotRooms[i])
-	}
-
-	qr := bleve.NewBooleanQuery()
-
-	// Must satisfy room_id
-	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(set.StringSlice(roomIDsSet), "room_id")))
-
-	// Must satisfy sender
-	mustSenders := generateQueryList(q.Filter.Senders, "sender")
-	if len(mustSenders) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustSenders))
-	}
-
-	// Must satisfy not sender
-	qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
-
-	// Must satisfy type
-	mustType := generateQueryList(q.Filter.Types, "type")
-	if len(mustType) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustType))
-	}
-
-	// Must satisfy not type
-	qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
-
-	// The user-entered query string
-	if len(q.Keys) > 0 {
-		oneOf := query.NewDisjunctionQuery(nil)
-		for _, key := range q.Keys {
-			qrs := query.NewMatchQuery(strings.ToLower(q.SearchTerm))
-			qrs.SetField(key)
-			oneOf.AddQuery(qrs)
-		}
-		qr.AddMust(oneOf)
-	} else {
-		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
-	}
-
-	req := bleve.NewSearchRequest(qr)
-	// TODO be less naive on rank/recent check
-	if q.OrderBy == "recent" {
-		//req.SortBy([]string{"-time"})
-		req.SortByCustom(search.SortOrder{
-			&search.SortField{
-				Field: "time",
-				Desc:  true,
-			},
-		})
-	}
-	res, err := idxr.Query(req)
-
-	if err != nil {
-		return
-	}
-
-	results := make([]Result, 0, len(res.Hits))
-	rooms := map[string]struct{}{}
-
-	wantsContext := q.EventContext != nil
-
-	beforeLimit := 5
-	afterLimit := 5
-	includeProfile := q.EventContext.IncludeProfile
-
-	if q.EventContext.BeforeLimit != nil {
-		beforeLimit = *q.EventContext.BeforeLimit
-	}
-	if q.EventContext.AfterLimit != nil {
-		afterLimit = *q.EventContext.AfterLimit
-	}
-
-	for _, hit := range res.Hits {
-
-		result := Result{
-			Rank: hit.Score,
+	/*
+		joinedRooms, err := cli.joinedRooms()
+		if err != nil {
+			return
 		}
 
-		segs := strings.SplitN(hit.ID, "/", 2)
-		roomID := segs[0]
-		eventID := segs[1]
+		joinedRoomIDsSet := set.NewNonTS()
+		for i := range joinedRooms.JoinedRooms {
+			joinedRoomIDsSet.Add(joinedRooms.JoinedRooms[i])
+		}
 
-		if wantsContext {
-			var context *RespContext
-			context, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
-			if err != nil {
-				return
+		q := sr.SearchCategories.RoomEvents
+
+		//groupKeys := []string
+		fmt.Println(q.Groupings)
+
+		wantedRoomIDsSet := set.NewNonTS()
+		for i := range q.Filter.Rooms {
+			wantedRoomIDsSet.Add(q.Filter.Rooms[i])
+		}
+
+		roomIDsSet := set.Intersection(joinedRoomIDsSet, wantedRoomIDsSet)
+
+		for i := range q.Filter.NotRooms {
+			roomIDsSet.Remove(q.Filter.NotRooms[i])
+		}
+
+		qr := bleve.NewBooleanQuery()
+
+		// Must satisfy room_id
+		qr.AddMust(query.NewDisjunctionQuery(generateQueryList(common.NewStringSet(set.StringSlice(roomIDsSet)), "room_id")))
+
+		// Must satisfy sender
+		mustSenders := generateQueryList(q.Filter.Senders, "sender")
+		if len(mustSenders) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustSenders))
+		}
+
+		// Must satisfy not sender
+		qr.AddMustNot(generateQueryList(q.Filter.NotSenders, "sender")...)
+
+		// Must satisfy type
+		mustType := generateQueryList(q.Filter.Types, "type")
+		if len(mustType) > 0 {
+			qr.AddMust(query.NewDisjunctionQuery(mustType))
+		}
+
+		// Must satisfy not type
+		qr.AddMustNot(generateQueryList(q.Filter.NotTypes, "type")...)
+
+		// The user-entered query string
+		if len(q.Keys) > 0 {
+			oneOf := query.NewDisjunctionQuery(nil)
+			for _, key := range q.Keys {
+				qrs := query.NewMatchQuery(strings.ToLower(q.SearchTerm))
+				qrs.SetField(key)
+				oneOf.AddQuery(qrs)
+			}
+			qr.AddMust(oneOf)
+		} else {
+			qr.AddMust(query.NewQueryStringQuery(strings.ToLower(q.SearchTerm)))
+		}
+
+		limit := q.Filter.Limit
+
+		//req := bleve.NewSearchRequest(qr)
+		// TODO from=pagination
+		req := bleve.NewSearchRequestOptions(qr, limit, 0, false)
+
+		// TODO be less naive on rank/recent check
+		if q.OrderBy == "recent" {
+			//req.SortBy([]string{"-time"})
+			req.SortByCustom(search.SortOrder{
+				&search.SortField{
+					Field: "time",
+					Desc:  true,
+				},
+			})
+		}
+		res, err := idxr.query(req)
+
+		if err != nil {
+			return
+		}
+
+		results := make([]*Result, 0, len(res.Hits))
+		rooms := map[string]struct{}{}
+
+		// START
+		wantsContext := q.EventContext != nil
+
+		beforeLimit := 5
+		afterLimit := 5
+		includeProfile := q.EventContext.IncludeProfile
+
+		if q.EventContext.BeforeLimit != nil {
+			beforeLimit = *q.EventContext.BeforeLimit
+		}
+		if q.EventContext.AfterLimit != nil {
+			afterLimit = *q.EventContext.AfterLimit
+		}
+		//END
+
+		for _, hit := range res.Hits {
+
+			result := Result{
+				Rank: hit.Score,
 			}
 
-			result.Result = context.Event
-			result.Context = &EventContext{
-				Start:        context.Start,
-				End:          context.End,
-				EventsBefore: context.EventsBefore,
-				EventsAfter:  context.EventsAfter,
-			}
+			segs := strings.SplitN(hit.ID, "/", 2)
+			roomID := segs[0]
+			eventID := segs[1]
 
-			if includeProfile {
-				result.Context.ProfileInfo = make(map[string]*UserProfile)
-				for _, ev := range context.State {
-					if ev.Type == "m.room.member" {
-						userProfile := UserProfile{}
+			if wantsContext {
+				var context *RespContext
+				context, err = cli.resolveEventContext(roomID, eventID, beforeLimit, afterLimit)
+				if err != nil {
+					return
+				}
 
-						if str, ok := ev.Content["displayname"].(string); ok {
-							userProfile.DisplayName = str
+				result.Result = context.Event
+				result.Context = &EventContext{
+					Start:        context.Start,
+					End:          context.End,
+					EventsBefore: context.EventsBefore,
+					EventsAfter:  context.EventsAfter,
+				}
+
+				if includeProfile {
+					result.Context.ProfileInfo = make(map[string]*UserProfile)
+					for _, ev := range context.State {
+						if ev.Type == "m.room.member" {
+							userProfile := UserProfile{}
+
+							if str, ok := ev.Content["displayname"].(string); ok {
+								userProfile.DisplayName = str
+							}
+							if str, ok := ev.Content["avatar_url"].(string); ok {
+								userProfile.AvatarURL = str
+							}
+
+							result.Context.ProfileInfo[*ev.StateKey] = &userProfile
 						}
-						if str, ok := ev.Content["avatar_url"].(string); ok {
-							userProfile.AvatarURL = str
-						}
-
-						result.Context.ProfileInfo[*ev.StateKey] = &userProfile
 					}
 				}
+			} else {
+				var ev *WrappedEvent
+				ev, err = cli.resolveEvent(roomID, eventID)
+				if err != nil {
+					return
+				}
+				result.Result = ev
 			}
-		} else {
-			var ev *gomatrix.Event
-			ev, err = cli.resolveEvent(roomID, eventID)
-			if err != nil {
-				return
-			}
-			result.Result = ev
+
+			results = append(results, &result)
+			rooms[result.Result.RoomID] = struct{}{}
 		}
 
-		results = append(results, result)
-		rooms[result.Result.RoomID] = struct{}{}
-	}
-
-	roomStateMap := map[string][]*gomatrix.Event{}
-	if q.IncludeState {
-		// fetch state from server using API.
-		for roomID := range rooms {
-			var stateEvs []*gomatrix.Event
-			stateEvs, err = cli.latestState(roomID)
-			if err != nil {
-				return
+		roomStateMap := map[string][]*gomatrix.Event{}
+		if q.IncludeState {
+			// fetch state from server using API.
+			for roomID := range rooms {
+				var stateEvs []*gomatrix.Event
+				stateEvs, err = cli.latestState(roomID)
+				if err != nil {
+					return
+				}
+				roomStateMap[roomID] = stateEvs
 			}
-			roomStateMap[roomID] = stateEvs
 		}
-	}
 
-	resp = Results{
-		Categories{
-			RoomEventResults{
-				Count:   int(res.Total),
-				Results: results,
-				State:   roomStateMap,
-				//Groups:,
-				//NextBatch:,
+		resp = Results{
+			Categories{
+				RoomEventResults{
+					Count:   int(res.Total),
+					Results: results,
+					State:   roomStateMap,
+					//Groups:,
+					//NextBatch:,
+				},
 			},
-		},
-	}
-	return
+		}
+	*/
+
+	return results, err
 }
 
 func getToken(r *http.Request) (string, bool) {
@@ -307,6 +667,49 @@ func getToken(r *http.Request) (string, bool) {
 	return "", false
 }
 
+func getBatch(r *http.Request) (b *batch, err error) {
+	if batchStr, ok := r.URL.Query()["next_batch"]; ok && len(batchStr) == 1 {
+		b, err = readBatch(batchStr[0])
+		return
+	}
+	return
+}
+
+func RegisterLocalHandler(router *mux.Router, idxr indexing.Indexer, conf *config.Config) {
+	router.HandleFunc("/clientapi/search", func(w http.ResponseWriter, r *http.Request) {
+		b, err := getBatch(r)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		resp, err := handler(r.Body, idxr, conf.Homeserver.URL, conf.LocalDaemon.AccessToken, b)
+
+		if err != nil {
+			if e, ok := err.(gomatrix.HTTPError); ok {
+				wrapped := e.WrappedError
+				fmt.Println(e, wrapped)
+				// http.Error...
+				// return
+			}
+			fmt.Println(err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		//hits, err := json.Marshal(events)
+		hits, err := json.Marshal(resp)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(hits)
+	})
+}
+
 func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
 	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
 		token, ok := getToken(r)
@@ -315,7 +718,13 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
 			http.Error(w, "access_token missing", http.StatusUnauthorized)
 		}
 
-		resp, err := handler(r.Body, idxr, hsURL, token)
+		b, err := getBatch(r)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+
+		resp, err := handler(r.Body, idxr, hsURL, token, b)
 
 		if err != nil {
 			if e, ok := err.(gomatrix.HTTPError); ok {
@@ -335,6 +744,7 @@ func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
 			return
 		}
 
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(hits)
 	})

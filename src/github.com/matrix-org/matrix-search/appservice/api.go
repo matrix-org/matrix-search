@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
+	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/indexing"
 	"net/http"
-	"time"
 )
 
 func authenticate(h http.HandlerFunc, hsToken string) http.HandlerFunc {
@@ -28,12 +28,25 @@ func doesNotExist(w http.ResponseWriter, _ *http.Request) {
 
 type Event struct {
 	Age       int                    `json:"age"`
+	StateKey  *string                `json:"state_key"`
 	Sender    string                 `json:"user_id"`
 	Type      string                 `json:"type"`
 	Timestamp int64                  `json:"origin_server_ts"`
 	ID        string                 `json:"event_id"`
 	RoomID    string                 `json:"room_id"`
 	Content   map[string]interface{} `json:"content"`
+}
+
+func (e *Event) Event() *gomatrix.Event {
+	return &gomatrix.Event{
+		StateKey:  e.StateKey,
+		Sender:    e.Sender,
+		Type:      e.Type,
+		Timestamp: e.Timestamp,
+		ID:        e.ID,
+		RoomID:    e.RoomID,
+		Content:   e.Content,
+	}
 }
 
 type transaction struct {
@@ -65,14 +78,10 @@ func txnHandler(w http.ResponseWriter, r *http.Request, txnId string, indexer in
 	fmt.Printf("Processing %d events.\n", len(txn.Events))
 
 	for _, ev := range txn.Events {
-		if ev.Type != "m.room.message" {
-			continue
-		}
-
-		ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
-		iev := indexing.NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
 		// TODO handle err from AddEvent and bail txn processing
-		indexer.AddEvent(ev.ID, ev.RoomID, iev)
+		if ev.Type == "m.rooom.message" {
+			indexer.IndexEvent(ev.Event())
+		}
 	}
 
 	//proc := processedTransaction{txnId, len(txn.Events)}

@@ -2,15 +2,21 @@
 	"version": 0,
 	"dependencies": [
 		{
+			"importpath": "github.com/RoaringBitmap/roaring",
+			"repository": "https://github.com/RoaringBitmap/roaring",
+			"revision": "1a28a7fa985680f9f4e1644c0a857ec359a444b0",
+			"branch": "master"
+		},
+		{
 			"importpath": "github.com/blevesearch/bleve",
 			"repository": "https://github.com/blevesearch/bleve",
-			"revision": "def77cb5485838fb317686cd23e2d0da1d6b8491",
+			"revision": "1d6d47ed3ad966075bf9162fee4caa5d8984733c",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/blevesearch/blevex/detectlang",
 			"repository": "https://github.com/blevesearch/blevex",
-			"revision": "3d6fce2ff9175b7bffc2b3c98ff553a3701868a2",
+			"revision": "4b158bb555a3297565afecf6fae675c74f1e47df",
 			"branch": "master",
 			"path": "/detectlang"
 		},
@@ -33,9 +39,15 @@
 			"branch": "master"
 		},
 		{
+			"importpath": "github.com/blevesearch/snowballstem",
+			"repository": "https://github.com/blevesearch/snowballstem",
+			"revision": "26b06a2c243d4f8ca5db3486f94409dd5b2a7467",
+			"branch": "master"
+		},
+		{
 			"importpath": "github.com/boltdb/bolt",
 			"repository": "https://github.com/boltdb/bolt",
-			"revision": "9da31745363232bc1e27dbab3569e77383a51585",
+			"revision": "fd01fc79c553a8e99d512a07e8e0c63d4a3ccfc5",
 			"branch": "master"
 		},
 		{
@@ -47,19 +59,25 @@
 		{
 			"importpath": "github.com/couchbase/moss",
 			"repository": "https://github.com/couchbase/moss",
-			"revision": "010c98934dc0b4e69f2d27c5abdfd36bbf6de3ee",
+			"revision": "929cc75f09a3bec7da9f993b041fbd7c9a0daa92",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/couchbase/vellum",
+			"repository": "https://github.com/couchbase/vellum",
+			"revision": "eb6ae3743b3f300f2136f83ca78c08cc071edbd4",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/cznic/b",
 			"repository": "https://github.com/cznic/b",
-			"revision": "c0c71e655879a2848b5a0e0208b63f97325cbacd",
+			"revision": "35e9bbe41f07452a183c517a5fc5f3c9f45eaa0f",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/denisenkom/go-mssqldb",
 			"repository": "https://github.com/denisenkom/go-mssqldb",
-			"revision": "8a15d1bb0c8eaa4b870c016b312de5b50b493b4e",
+			"revision": "c4e5513e46d427e67707ab54c97990301fb56c10",
 			"branch": "master"
 		},
 		{
@@ -71,32 +89,50 @@
 		{
 			"importpath": "github.com/fatih/set",
 			"repository": "https://github.com/fatih/set",
-			"revision": "27c40922c40b43fe04554d8223a402af3ea333f3",
+			"revision": "168a5d71ba0669ae06888225478d73a113f1687e",
 			"branch": "v0.1.1"
+		},
+		{
+			"importpath": "github.com/gin-contrib/sse",
+			"repository": "https://github.com/gin-contrib/sse",
+			"revision": "22d885f9ecc78bf4ee5d72b937e4bbcdc58e8cae",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/gin-gonic/gin",
+			"repository": "https://github.com/gin-gonic/gin",
+			"revision": "bf7803815b0baa22ff7a10457932882dfbf09925",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/glycerine/go-unsnap-stream",
+			"repository": "https://github.com/glycerine/go-unsnap-stream",
+			"revision": "9f0cb55181dd3a0a4c168d3dbc72d4aca4853126",
+			"branch": "master"
 		},
 		{
 			"importpath": "github.com/go-sql-driver/mysql",
 			"repository": "https://github.com/go-sql-driver/mysql",
-			"revision": "9181e3a86a19bacd63e68d43ae8b7b36320d8092",
+			"revision": "64db0f7ebe171b596aa9b26f39a79f7413a3b617",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/golang/protobuf/proto",
 			"repository": "https://github.com/golang/protobuf",
-			"revision": "1e59b77b52bf8e4b449a57e6f79f21226d571845",
+			"revision": "3a3da3a4e26776cc22a79ef46d5d58477532dede",
 			"branch": "master",
 			"path": "/proto"
 		},
 		{
 			"importpath": "github.com/golang/snappy",
 			"repository": "https://github.com/golang/snappy",
-			"revision": "553a641470496b2327abcac10b36396bd98e45c9",
+			"revision": "2e65f85255dbc3072edf28d6b5b8efc472979f5a",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/gorilla/mux",
 			"repository": "https://github.com/gorilla/mux",
-			"revision": "5ab525f4fb1678e197ae59401e9050fa0b6cb5fd",
+			"revision": "e0b5abaaae35242fa74372f26c24107711702a4e",
 			"branch": "master"
 		},
 		{
@@ -108,49 +144,73 @@
 		{
 			"importpath": "github.com/jinzhu/gorm",
 			"repository": "https://github.com/jinzhu/gorm",
-			"revision": "0a51f6cdc55d1650d9ed3b4c13026cfa9133b01e",
+			"revision": "82eb9f8a5bbb5e6b929d2f0ae5b934e6a253f94e",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/jinzhu/inflection",
 			"repository": "https://github.com/jinzhu/inflection",
-			"revision": "1c35d901db3da928c72a72d8458480cc9ade058f",
+			"revision": "04140366298a54a039076d798123ffa108fff46c",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/kljensen/snowball",
+			"repository": "https://github.com/kljensen/snowball",
+			"revision": "41667e33a4b9b9829cffe591d3718c8be9469855",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/lib/pq",
 			"repository": "https://github.com/lib/pq",
-			"revision": "83612a56d3dd153a94a629cd64925371c9adad78",
+			"revision": "90697d60dd844d5ef6ff15135d0203f65d2f53b8",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/matrix-org/gomatrix",
 			"repository": "https://github.com/matrix-org/gomatrix",
-			"revision": "a7fc80c8060c2544fe5d4dae465b584f8e9b4e27",
+			"revision": "eb6a57bae949723df0d4947a03d4136a1f64b784",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/mattn/go-isatty",
+			"repository": "https://github.com/mattn/go-isatty",
+			"revision": "6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/mattn/go-sqlite3",
 			"repository": "https://github.com/mattn/go-sqlite3",
-			"revision": "d5ffb5c0cca8778699a929b236766f4a7af674e8",
+			"revision": "a5cc8a2afa55275babb06216b4902d9f640d8fed",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/philhofer/fwd",
+			"repository": "https://github.com/philhofer/fwd",
+			"revision": "bb6d471dc95d4fe11e432687f8b70ff496cf3136",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/rcrowley/go-metrics",
 			"repository": "https://github.com/rcrowley/go-metrics",
-			"revision": "e181e095bae94582363434144c61a9653aff6e50",
+			"revision": "e2704e165165ec55d062f5919b4b29494e9fa790",
+			"branch": "master"
+		},
+		{
+			"importpath": "github.com/sirupsen/logrus",
+			"repository": "https://github.com/sirupsen/logrus",
+			"revision": "ea8897e79973357ba785ac2533559a6297e83c44",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/spf13/cobra",
 			"repository": "https://github.com/spf13/cobra",
-			"revision": "ccaecb155a2177302cb56cae929251a256d0f646",
+			"revision": "ef82de70bb3f60c65fb8eebacbb2d122ef517385",
 			"branch": "master"
 		},
 		{
 			"importpath": "github.com/spf13/pflag",
 			"repository": "https://github.com/spf13/pflag",
-			"revision": "4c012f6dcd9546820e378d0bdda4d8fc772cdfea",
+			"revision": "583c0c0531f06d5278b7d917446061adc344b5cd",
 			"branch": "master"
 		},
 		{
@@ -162,41 +222,75 @@
 		{
 			"importpath": "github.com/syndtr/goleveldb/leveldb",
 			"repository": "https://github.com/syndtr/goleveldb",
-			"revision": "34011bf325bce385408353a30b101fe5e923eb6e",
+			"revision": "5d6fca44a948d2be89a9702de7717f0168403d3d",
 			"branch": "master",
 			"path": "/leveldb"
 		},
 		{
+			"importpath": "github.com/tinylib/msgp/msgp",
+			"repository": "https://github.com/tinylib/msgp",
+			"revision": "c8cf64dff2009d53fa8f8a16df54d1cdfc64c4a7",
+			"branch": "master",
+			"path": "/msgp"
+		},
+		{
+			"importpath": "github.com/ugorji/go/codec",
+			"repository": "https://github.com/ugorji/go",
+			"revision": "f3cacc17c85ecb7f1b6a9e373ee85d1480919868",
+			"branch": "master",
+			"path": "/codec"
+		},
+		{
 			"importpath": "github.com/willf/bitset",
 			"repository": "https://github.com/willf/bitset",
-			"revision": "1a37ad96e8c1a11b20900a232874843b5174221f",
+			"revision": "8ce1146b8621c95164efd9c8b1124cfa9b8afb4e",
 			"branch": "master"
+		},
+		{
+			"importpath": "golang.org/x/crypto/ssh/terminal",
+			"repository": "https://go.googlesource.com/crypto",
+			"revision": "df8d4716b3472e4a531c33cedbe537dae921a1a9",
+			"branch": "master",
+			"path": "/ssh/terminal"
 		},
 		{
 			"importpath": "golang.org/x/net/context",
 			"repository": "https://go.googlesource.com/net",
-			"revision": "d866cfc389cec985d6fda2859936a575a55a3ab6",
+			"revision": "dfa909b99c79129e1100513e5cd36307665e5723",
 			"branch": "master",
 			"path": "/context"
 		},
 		{
+			"importpath": "golang.org/x/sys/windows",
+			"repository": "https://go.googlesource.com/sys",
+			"revision": "c11f84a56e43e20a78cee75a7c034031ecf57d1f",
+			"branch": "master",
+			"path": "/windows"
+		},
+		{
 			"importpath": "golang.org/x/text/transform",
 			"repository": "https://go.googlesource.com/text",
-			"revision": "eb22672bea55af56d225d4e35405f4d2e9f062a0",
+			"revision": "5c1cf69b5978e5a34c5f9ba09a83e56acc4b7877",
 			"branch": "master",
 			"path": "/transform"
 		},
 		{
 			"importpath": "golang.org/x/text/unicode/norm",
 			"repository": "https://go.googlesource.com/text",
-			"revision": "eb22672bea55af56d225d4e35405f4d2e9f062a0",
+			"revision": "5c1cf69b5978e5a34c5f9ba09a83e56acc4b7877",
 			"branch": "master",
 			"path": "/unicode/norm"
 		},
 		{
+			"importpath": "gopkg.in/go-playground/validator.v8",
+			"repository": "https://gopkg.in/go-playground/validator.v8",
+			"revision": "5f1438d3fca68893a817e4a66806cea46a9e4ebf",
+			"branch": "master"
+		},
+		{
 			"importpath": "gopkg.in/yaml.v2",
 			"repository": "https://gopkg.in/yaml.v2",
-			"revision": "287cf08546ab5e7e37d55a84f7ed3fd1db036de5",
+			"revision": "5420a8b6744d3b0345ab293f6fcba19c978f1183",
 			"branch": "v2"
 		}
 	]

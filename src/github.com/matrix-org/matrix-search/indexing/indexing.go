@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/analysis/analyzer/custom"
-	"github.com/blevesearch/bleve/analysis/analyzer/keyword"
 	"github.com/blevesearch/bleve/analysis/analyzer/web"
 	"github.com/blevesearch/bleve/analysis/lang/en"
 	"github.com/blevesearch/bleve/analysis/token/apostrophe"
@@ -19,7 +18,8 @@ import (
 	"github.com/blevesearch/bleve/mapping"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/blevesearch/blevex/detectlang"
-	"log"
+	"github.com/matrix-org/gomatrix"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"strings"
 	"sync"
@@ -31,7 +31,19 @@ type Indexer struct {
 	sync.RWMutex
 }
 
-func (i *Indexer) getIndex(id string) (idx bleve.Index) {
+func GetIndex(id string) (idx bleve.Index) {
+	var err error
+	idx, err = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
+
+	if err != nil {
+		log.WithError(err).Error("failed to get bleve index")
+		return
+	}
+
+	return
+}
+
+func (i *Indexer) GetIndex(id string) (idx bleve.Index) {
 	id = "all"
 
 	i.RLock()
@@ -45,24 +57,25 @@ func (i *Indexer) getIndex(id string) (idx bleve.Index) {
 	i.Lock()
 	defer i.Unlock()
 
-	var err error
-	idx, err = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
+	idx = GetIndex(id)
+	i.idxs[id] = idx
+	return idx
+}
 
-	if err != nil {
-		fmt.Println(err)
+func (i *Indexer) IndexEvent(ev *gomatrix.Event) {
+	if ev.Type != "m.room.message" {
 		return
 	}
 
-	i.idxs[id] = idx
-	return
+	ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
+	iev := NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
+	// TODO handle err from AddEvent and bail txn processing
+	err := i.AddEvent(ev.ID, ev.RoomID, iev)
+	fmt.Println(err)
 }
 
-func (i *Indexer) AddEvent(ID, RoomID string, ev Event) bool {
-	if err := ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.getIndex(RoomID)); err != nil {
-		fmt.Println(err)
-		return false
-	}
-	return true
+func (i *Indexer) AddEvent(ID, RoomID string, ev Event) error {
+	return ev.Index(fmt.Sprintf("%s/%s", RoomID, ID), i.GetIndex(RoomID))
 }
 
 func makeSearchQuery(query string) query.Query {
@@ -70,20 +83,20 @@ func makeSearchQuery(query string) query.Query {
 }
 
 func (i *Indexer) Query(sr *bleve.SearchRequest) (*bleve.SearchResult, error) {
-	ix := i.getIndex("")
+	ix := i.GetIndex("")
 	return ix.Search(sr)
 }
 
 //func (i *Indexer) QueryMultiple(roomIds []string, qs string) (*bleve.SearchResult, error) {
 //	//targetedIdxs := make([]bleve.Index, len(roomIds))
 //	//for j, roomId := range roomIds {
-//	//	targetedIdxs[j] = i.getIndex(roomId)
+//	//	targetedIdxs[j] = i.GetIndex(roomId)
 //	//}
 //	//collection := bleve.NewIndexAlias(targetedIdxs...)
-//	collection := i.getIndex("")
+//	collection := i.GetIndex("")
 //	request := makeSearchQuery(qs)
 //
-//	roomIdQueries := make([]query.Query, 0, len(roomIds))
+//	roomIdQueries := make([]query.query, 0, len(roomIds))
 //	for _, roomId := range roomIds {
 //		qr := query.NewTermQuery(roomId)
 //		qr.SetField("room_id")
@@ -155,8 +168,7 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 	if index == nil {
 		return errors.New("missing index")
 	}
-	err := index.Index(ID, ev)
-	return err
+	return index.Index(ID, ev)
 }
 
 func NewEvent(sender, roomID, evType string, content map[string]interface{}, time time.Time) Event {
@@ -216,23 +228,39 @@ func createIndexMapping() *mapping.IndexMappingImpl {
 	})
 
 	if err != nil {
-		fmt.Println(err)
+		panic(err)
+	}
+
+	err = indexMapping.AddCustomAnalyzer("custom_exact_keyword", map[string]interface{}{
+		"type":      custom.Name,
+		"tokenizer": single.Name,
+		"token_filters": []string{
+			lowercase.Name,
+		},
+		"char_filters": []string{},
+	})
+
+	if err != nil {
+		panic(err)
 	}
 
 	return indexMapping
 }
 
+// TODO look into size optimizations
+// watch out for breaking highlight stuff
 func createEventMapping() (mapping.IndexMapping, error) {
 	indexMapping := createIndexMapping()
 
 	// a generic reusable mapping for english text
-	englishTextFieldMapping := bleve.NewTextFieldMapping()
-	englishTextFieldMapping.Analyzer = en.AnalyzerName
+	//englishTextFieldMapping := bleve.NewTextFieldMapping()
+	//englishTextFieldMapping.Analyzer = en.AnalyzerName
 
 	// a generic reusable mapping for keyword text
 	keywordFieldMapping := bleve.NewTextFieldMapping()
-	keywordFieldMapping.Analyzer = keyword.Name
+	keywordFieldMapping.Analyzer = "custom_exact_keyword"
 	keywordFieldMapping.IncludeInAll = false
+	keywordFieldMapping.Store = false
 
 	// a specific mapping to index the description fields
 	// detected language
@@ -240,14 +268,16 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	descriptionLangFieldMapping.Name = "descriptionLang"
 	descriptionLangFieldMapping.Analyzer = detectlang.AnalyzerName
 	descriptionLangFieldMapping.Store = false
-	descriptionLangFieldMapping.IncludeTermVectors = false
-	//descriptionLangFieldMapping.IncludeInAll = false
+	//descriptionLangFieldMapping.IncludeTermVectors = false
+	descriptionLangFieldMapping.IncludeInAll = false
 
 	descriptionLangFieldMappingAlt := bleve.NewTextFieldMapping()
 	descriptionLangFieldMappingAlt.Analyzer = "custom_alt"
 
 	descriptionLangFieldMappingWeb := bleve.NewTextFieldMapping()
 	descriptionLangFieldMappingWeb.Analyzer = web.Name
+	descriptionLangFieldMappingWeb.Store = false
+	descriptionLangFieldMappingWeb.IncludeInAll = false
 
 	eventMapping := bleve.NewDocumentMapping()
 
@@ -267,8 +297,9 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
 
 	indexMapping.AddDocumentMapping("event", eventMapping)
+	indexMapping.DefaultType = "event"
 
-	indexMapping.TypeField = "type"
+	//indexMapping.TypeField = "room_id"
 	indexMapping.DefaultAnalyzer = textFieldAnalyzer
 
 	return indexMapping, nil
@@ -280,34 +311,6 @@ func addCustomTokenFilter(indexMapping *mapping.IndexMappingImpl) *mapping.Index
 		//"side": ngram.FRONT,
 		"min": 3.0,
 		"max": 25.0,
-	})
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return indexMapping
-}
-
-func addCustomAnalyzers(indexMapping *mapping.IndexMappingImpl) *mapping.IndexMappingImpl {
-	indexMapping = addCustomTokenFilter(indexMapping)
-
-	err := indexMapping.AddCustomAnalyzer("not_analyzed", map[string]interface{}{
-		"type":      custom.Name,
-		"tokenizer": single.Name,
-	})
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = indexMapping.AddCustomAnalyzer("fulltext_ngram", map[string]interface{}{
-		"type":      custom.Name,
-		"tokenizer": unicode.Name,
-		"token_filters": []string{
-			lowercase.Name,
-			"bigram_tokenfilter",
-		},
 	})
 
 	if err != nil {

@@ -27,7 +27,9 @@ func TestCreate(t *testing.T) {
 	}
 
 	var newUser User
-	DB.First(&newUser, user.Id)
+	if err := DB.First(&newUser, user.Id).Error; err != nil {
+		t.Errorf("No error should happen, but got %v", err)
+	}
 
 	if !reflect.DeepEqual(newUser.PasswordHash, []byte{'f', 'a', 'k', '4'}) {
 		t.Errorf("User's PasswordHash should be saved ([]byte)")
@@ -38,7 +40,7 @@ func TestCreate(t *testing.T) {
 	}
 
 	if newUser.UserNum != Num(111) {
-		t.Errorf("User's UserNum should be saved (custom type)")
+		t.Errorf("User's UserNum should be saved (custom type), but got %v", newUser.UserNum)
 	}
 
 	if newUser.Latitude != float {
@@ -57,6 +59,17 @@ func TestCreate(t *testing.T) {
 	DB.First(&user, user.Id)
 	if user.CreatedAt.Format(time.RFC3339Nano) != newUser.CreatedAt.Format(time.RFC3339Nano) {
 		t.Errorf("CreatedAt should not be changed after update")
+	}
+}
+
+func TestCreateEmptyStrut(t *testing.T) {
+	type EmptyStruct struct {
+		ID uint
+	}
+	DB.AutoMigrate(&EmptyStruct{})
+
+	if err := DB.Create(&EmptyStruct{}).Error; err != nil {
+		t.Errorf("No error should happen when creating user, but got %v", err)
 	}
 }
 
