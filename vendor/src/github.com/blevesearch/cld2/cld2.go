@@ -6,6 +6,7 @@
 // For more information about CLD2, see https://code.google.com/p/cld2/.
 package cld2
 
+// #cgo LDFLAGS: -lstdc++
 // #include <stdlib.h>
 // #include "cld2.h"
 import "C"

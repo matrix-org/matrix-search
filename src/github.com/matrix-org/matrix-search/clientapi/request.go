@@ -85,8 +85,8 @@ func (fp *FilterPart) UnmarshalJSON(b []byte) error {
 
 	// Limit (default=10)
 	limit := 10
-	if filter.Limit != nil {
-		limit = *filter.Limit
+	if filter.Limit != 0 {
+		limit = filter.Limit
 	}
 
 	*fp = FilterPart{
