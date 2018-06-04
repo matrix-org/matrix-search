@@ -41,6 +41,11 @@ type QueryResponse struct {
 	Total uint64        `json:"total"`
 }
 
+type RedactQuery struct {
+	RoomID  string `json:"roomId"`
+	EventID string `json:"eventId"`
+}
+
 func (req *QueryRequest) Valid() bool {
 	if req.SortBy != "rank" && req.SortBy != "recent" {
 		return false
@@ -125,6 +130,10 @@ func splitRoomEventIDs(str string) (roomID, eventID string) {
 	return parts[0], parts[1]
 }
 
+func makeIndexID(roomID, eventID string) string {
+	return fmt.Sprintf("%s/%s", roomID, eventID)
+}
+
 func main() {
 	// force colours on the logrus standard logger
 	log.StandardLogger().Formatter = &log.TextFormatter{ForceColors: true}
@@ -158,7 +167,7 @@ func main() {
 				"event_id": ev.ID,
 			})
 
-			if err := index.Index(fmt.Sprintf("%s/%s", ev.RoomID, ev.ID), iev); err != nil {
+			if err := index.Index(makeIndexID(ev.RoomID, ev.ID), iev); err != nil {
 				// TODO keep a list of these maybe as missing events are not good
 				logger.WithError(err).Error("failed to index event")
 			} else {
@@ -167,7 +176,7 @@ func main() {
 		}
 
 		w.WriteHeader(http.StatusOK)
-	}).Methods("PUT")
+	}).Methods(http.MethodPut)
 
 	router.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
 		var req QueryRequest
@@ -220,7 +229,29 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(res)
-	}).Methods("POST")
+	}).Methods(http.MethodPost)
+
+	router.HandleFunc("/api/redact", func(w http.ResponseWriter, r *http.Request) {
+		var req RedactQuery
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.WithField("path", "/api/redact").WithError(err).Error("failed to decode request body")
+			return
+		}
+
+		logger := log.WithFields(log.Fields{
+			"room_id":  req.RoomID,
+			"event_id": req.EventID,
+		})
+
+		if err := index.Delete(makeIndexID(req.RoomID, req.EventID)); err != nil {
+			logger.WithError(err).Error("failed to redact index")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		logger.Info("redacted index successfully")
+		w.WriteHeader(http.StatusOK)
+	}).Methods(http.MethodDelete)
 
 	bind := ":9999"
 
@@ -229,3 +260,7 @@ func main() {
 	// start the HTTP server
 	log.Fatal(http.ListenAndServe(bind, router))
 }
+
+// Node should just be a syncer for Encrypted stuff,
+// but we need to sync redactions too so both should be in there I guess
+// go has to house the bleve stuff
