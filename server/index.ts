@@ -7,6 +7,7 @@ declare var global: {
 };
 
 // import * as request from "request-promise";
+import argv from 'argv';
 import {RequestPromise, RequestPromiseOptions} from "request-promise";
 import cors from 'cors';
 import express, {Request, Response} from "express";
@@ -65,6 +66,25 @@ if (indexedDB) {
     setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 }
 
+argv.option([
+    {
+        name: 'url',
+        type: 'string',
+        description: 'The URL to be used to connect to the Matrix HS',
+    }, {
+        name: 'username',
+        type: 'string',
+        description: 'The username to be used to connect to the Matrix HS',
+    }, {
+        name: 'password',
+        type: 'string',
+        description: 'The password to be used to connect to the Matrix HS',
+    }, {
+        name: 'port',
+        type: 'int',
+        description: 'Port to bind to (default 8000)',
+    }
+]);
 
 class BleveHttp {
     request: RequestAPI<RequestPromise, RequestPromiseOptions, RequiredUriUrl>;
@@ -345,6 +365,8 @@ enum SearchOrder {
 }
 
 async function setup() {
+    const args = argv.run();
+
     let creds = {
         userId: global.localStorage.getItem('userId'),
         deviceId: global.localStorage.getItem('deviceId'),
@@ -352,14 +374,20 @@ async function setup() {
     };
 
     if (!creds.userId || !creds.deviceId || !creds.accessToken) {
+        if (!args.options['username'] || !args.options['password']) {
+            console.log('Username and Password were not specified on the commandline and none were saved');
+            argv.help();
+            process.exit(-1);
+        }
+
         const loginClient = createClient({
-            baseUrl: 'https://matrix.org',
+            baseUrl: args.options['url'] || 'https://matrix.org',
         });
 
         try {
             const res = await loginClient.login('m.login.password', {
-                user: '@webdevguru:matrix.org',
-                password: 'tlD$@5ZCUW41Y#Hg',
+                user: args.options['username'],
+                password: args.options['password'],
                 initial_device_display_name: 'Matrix Search Daemon',
             });
 
@@ -638,7 +666,7 @@ async function setup() {
         res.sendStatus(500);
     });
 
-    const port = 8000;
+    const port = args.options['port'] || 8000;
     app.listen(port, () => {
         console.log(`We are live on ${port}`);
     });
