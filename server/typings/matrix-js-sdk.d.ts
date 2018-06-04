@@ -27,9 +27,27 @@ export class MatrixError {
     constructor(errorJson: any);
 }
 
+export interface UserProfile {
+    displayname?: string;
+    avatar_url?: string;
+}
+
+export interface EventContext {
+    start: string;
+    end: string;
+
+    profile_info: Map<string, UserProfile>
+
+    events_after: Array<Event>;
+    events_before: Array<Event>;
+}
+
 export interface EventWithContext {
     event: MatrixEvent;
     context?: {
+        start: string;
+        end: string;
+
         state: Array<MatrixEvent>;
         events_after: Array<MatrixEvent>;
         events_before: Array<MatrixEvent>;
@@ -44,7 +62,7 @@ export class MatrixClient {
     private _requestTokenFromEndpoint(endpoint: string, params: object): Promise<string>
 
     fetchEvent(roomId: string, eventId: string): Promise<MatrixEvent>;
-    fetchEventContext(roomId: string, eventId: string): Promise<EventWithContext>
+    fetchEventContext(roomId: string, eventId: string, limit: number): Promise<EventWithContext>
 
     acceptGroupInvite(groupId: string, opts: object): Promise<object> | MatrixError;
     addListener(event: string, listener: any);
@@ -280,6 +298,10 @@ declare namespace Matrix.Models {
         sender: string;
         room_id: string;
         content: object;
+        state_key?: string;
+        type: string;
+
+        private _clearEvent: object;
     }
 
     interface MapStringString {
@@ -294,6 +316,9 @@ declare namespace Matrix.Models {
         error: Error;
         forwardLooking: boolean;
         constructor(event: Event);
+
+        // custom
+        public getClearEvent(): Event;
 
         readonly EventStatus: string;
         private _setClearData(decryptionResult: any);

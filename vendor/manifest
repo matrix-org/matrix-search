@@ -196,6 +196,12 @@
 			"branch": "master"
 		},
 		{
+			"importpath": "github.com/sirupsen/logrus",
+			"repository": "https://github.com/sirupsen/logrus",
+			"revision": "ea8897e79973357ba785ac2533559a6297e83c44",
+			"branch": "master"
+		},
+		{
 			"importpath": "github.com/spf13/cobra",
 			"repository": "https://github.com/spf13/cobra",
 			"revision": "ef82de70bb3f60c65fb8eebacbb2d122ef517385",
@@ -241,11 +247,25 @@
 			"branch": "master"
 		},
 		{
+			"importpath": "golang.org/x/crypto/ssh/terminal",
+			"repository": "https://go.googlesource.com/crypto",
+			"revision": "df8d4716b3472e4a531c33cedbe537dae921a1a9",
+			"branch": "master",
+			"path": "/ssh/terminal"
+		},
+		{
 			"importpath": "golang.org/x/net/context",
 			"repository": "https://go.googlesource.com/net",
 			"revision": "dfa909b99c79129e1100513e5cd36307665e5723",
 			"branch": "master",
 			"path": "/context"
+		},
+		{
+			"importpath": "golang.org/x/sys/windows",
+			"repository": "https://go.googlesource.com/sys",
+			"revision": "c11f84a56e43e20a78cee75a7c034031ecf57d1f",
+			"branch": "master",
+			"path": "/windows"
 		},
 		{
 			"importpath": "golang.org/x/text/transform",

@@ -19,7 +19,7 @@ import (
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/blevesearch/blevex/detectlang"
 	"github.com/matrix-org/gomatrix"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"strings"
 	"sync"
@@ -29,6 +29,18 @@ import (
 type Indexer struct {
 	idxs map[string]bleve.Index
 	sync.RWMutex
+}
+
+func GetIndex(id string) (idx bleve.Index) {
+	var err error
+	idx, err = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
+
+	if err != nil {
+		log.WithError(err).Error("failed to get bleve index")
+		return
+	}
+
+	return
 }
 
 func (i *Indexer) GetIndex(id string) (idx bleve.Index) {
@@ -45,16 +57,9 @@ func (i *Indexer) GetIndex(id string) (idx bleve.Index) {
 	i.Lock()
 	defer i.Unlock()
 
-	var err error
-	idx, err = Bleve(base64.URLEncoding.EncodeToString([]byte(id)))
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
+	idx = GetIndex(id)
 	i.idxs[id] = idx
-	return
+	return idx
 }
 
 func (i *Indexer) IndexEvent(ev *gomatrix.Event) {

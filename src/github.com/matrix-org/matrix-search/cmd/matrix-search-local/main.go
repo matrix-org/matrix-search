@@ -10,7 +10,7 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 	"strings"
 	"time"
@@ -121,41 +121,29 @@ func calculateHighlights(hit *search.DocumentMatch, keys []string) common.String
 }
 
 func splitRoomEventIDs(str string) (roomID, eventID string) {
-	segs := strings.SplitN(str, "/", 2)
-	return segs[0], segs[1]
+	parts := strings.SplitN(str, "/", 2)
+	return parts[0], parts[1]
 }
 
 func main() {
-	conf := common.LoadConfig()
-	if conf == nil {
-		panic("MISSING")
-	}
+	// force colours on the logrus standard logger
+	log.StandardLogger().Formatter = &log.TextFormatter{ForceColors: true}
 
-	idxr := indexing.NewIndexer()
-	index := idxr.GetIndex("")
+	index := indexing.GetIndex("all")
 
-	// create a router to serve static files
 	router := mux.NewRouter()
 	router.StrictSlash(true)
-
-	// PUT INDEX
-	// [MatrixEvent]
-
-	// POST QUERY
-	//
-
-	// SEARCH
-	// INDEX
-	// takes an array of Matrix events
 
 	router.HandleFunc("/api/index", func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
 		var evs []gomatrix.Event
-		err := decoder.Decode(&evs)
-		if err != nil {
-			fmt.Println(err)
+
+		if err := decoder.Decode(&evs); err != nil {
+			log.WithField("path", "/api/index").WithError(err).Error("failed to decode request body")
+			return
 		}
-		// defer r.Body.Close()
+
+		log.WithField("batch_size", len(evs)).Info("received batch of events to index")
 
 		for _, ev := range evs {
 			if ev.Type != "m.room.message" {
@@ -164,13 +152,17 @@ func main() {
 
 			ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
 			iev := indexing.NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
-			// TODO handle err from AddEvent and bail txn processing
 
-			err = index.Index(fmt.Sprintf("%s/%s", ev.RoomID, ev.ID), iev)
-			if err != nil {
-				fmt.Println(err)
+			logger := log.WithFields(log.Fields{
+				"room_id":  ev.RoomID,
+				"event_id": ev.ID,
+			})
+
+			if err := index.Index(fmt.Sprintf("%s/%s", ev.RoomID, ev.ID), iev); err != nil {
+				// TODO keep a list of these maybe as missing events are not good
+				logger.WithError(err).Error("failed to index event")
 			} else {
-				log.Println(ev)
+				logger.Info("successfully indexed event")
 			}
 		}
 
@@ -180,21 +172,36 @@ func main() {
 	router.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
 		var req QueryRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			fmt.Println(err)
+			log.WithField("path", "/api/query").WithError(err).Error("failed to decode request body")
 			return
 		}
 
 		if valid := req.Valid(); !valid {
-			fmt.Println("query Request invalid", req)
+			log.WithField("path", "/api/query").WithField("req", req).Error("invalid query request provided")
 			return
 		}
+
+		logger := log.WithFields(log.Fields{
+			"search_term": req.SearchTerm,
+			"sort_by":     req.SortBy,
+			"size":        req.Size,
+			"from":        req.From,
+		})
+
+		logger.Info("processing search request")
 
 		sr := req.generateSearchRequest()
 		resp, err := index.Search(sr)
 
 		if err != nil {
-			panic(err)
+			log.WithError(err).Error("failed to search index")
+			return
 		}
+
+		logger.WithFields(log.Fields{
+			"num_found": resp.Total,
+			"num_sent":  len(resp.Hits),
+		}).Info("search request completed")
 
 		res := QueryResponse{
 			Total: resp.Total,
@@ -210,16 +217,15 @@ func main() {
 			res.Rows[i].Highlights = calculateHighlights(resp.Hits[i], req.Keys)
 		}
 
-		fmt.Println(resp, err)
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(res)
 	}).Methods("POST")
 
-	fmt.Println("Starting LS")
+	bind := ":9999"
+
+	log.WithField("bind", bind).Info("starting matrix-search indexing daemon")
 
 	// start the HTTP server
-	http.Handle("/", router)
-	log.Fatal(http.ListenAndServe(":9999", nil))
+	log.Fatal(http.ListenAndServe(bind, router))
 }

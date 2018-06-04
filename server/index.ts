@@ -1,3 +1,5 @@
+import {EventContext, UserProfile} from "./typings/matrix-js-sdk";
+
 declare var global: {
     Olm: any
     localStorage?: any
@@ -21,7 +23,7 @@ const request = require('request-promise');
 
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 
-// create directory which will house the 3 stores.
+// create directory which will house the stores.
 mkdirp.sync('./store');
 // Loading localStorage module
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
@@ -45,7 +47,10 @@ import {
     WebStorageSessionStore,
 } from 'matrix-js-sdk';
 
-const utils = require('matrix-js-sdk/src/utils');
+// side-effect upgrade MatrixClient prototype
+import './matrix_client_ext';
+// side-effect upgrade Map and Set prototypes
+import './builtin_ext';
 
 let indexedDB;
 
@@ -92,7 +97,6 @@ class BleveHttp {
 const b = new BleveHttp("http://localhost:9999/api/");
 
 const q = new Queue(async (batch: Event[], cb) => {
-    console.log(batch);
     try {
         cb(null, await b.index(batch));
     } catch (e) {
@@ -105,9 +109,9 @@ const q = new Queue(async (batch: Event[], cb) => {
     store: new SqliteStore({
         path: './store/queue.sqlite',
     }),
-    filter: (event: MatrixEvent, cb) => {
-        if (event.getType() !== 'm.room.message') return cb('not m.room.message');
-        return cb(null, event.event);
+    filter: (event: Event, cb) => {
+        if (event.type !== 'm.room.message') return cb('not m.room.message');
+        return cb(null, event);
     }
 });
 
@@ -121,34 +125,35 @@ q.on('batch_failed', function(err) {
 
 setup().then(console.log).catch(console.error);
 
-declare global {
-    interface Set<T> {
-        intersect<T>(s: Set<T>): Set<T>;
-        union<T>(s: Set<T>): Set<T>;
-    }
+interface GroupValueJSON {
+    order: number;
+    next_batch?: string;
+    results: Array<string>;
 }
 
-Set.prototype.intersect = function<T>(s: Set<T>): Set<T> {
-    return new Set<T>([...this].filter(x => s.has(x)));
-};
-Set.prototype.union = function<T>(s: Set<T>): Set<T> {
-    return new Set<T>([...this, ...s]);
-};
-
 class GroupValue {
-    public order: number|undefined;
-    public nextBatch: string;
+    public order: number;
+    public next_batch: string;
     public results: Array<string>;
 
-    constructor() {
-        this.order = undefined;
-        this.nextBatch = "";
+    constructor(order: number) {
+        this.order = order;
+        this.next_batch = "";
         this.results = [];
     }
 
-    add(eventId: string, order: number) {
-        if (this.order === undefined) this.order = order;
+    add(eventId: string) {
         this.results.push(eventId);
+    }
+
+    // don't send next_batch if it is empty
+    toJSON(): GroupValueJSON {
+        const o: GroupValueJSON = {
+            order: this.order,
+            results: this.results,
+        };
+        if (this.next_batch) o.next_batch = this.next_batch;
+        return o;
     }
 }
 
@@ -186,8 +191,9 @@ class Batch {
 }
 
 interface Query {
-    must: Map<string, Array<string>>;
-    mustNot: Map<string, Array<string>>;
+    must?: Map<string, Set<string>>;
+    should?: Map<string, Set<string>>;
+    mustNot?: Map<string, Set<string>>;
 }
 
 interface BleveRequest {
@@ -213,81 +219,19 @@ interface BleveResponse {
     total: number;
 }
 
-interface EventLookupContext {
-    start: string;
-    end: string;
-    eventsBefore: Array<MatrixEvent>;
-    eventsAfter: Array<MatrixEvent>;
-    state: Array<MatrixEvent>;
-}
-
 interface EventLookupResult {
     event: MatrixEvent;
     score: number;
-    context: EventLookupContext | null;
+    state?: Array<MatrixEvent>;
+    context?: EventContext;
     highlights: Set<string>;
 }
 
 interface Result {
-    rows: Array<BleveResponseRow>;
-    lookup: Array<EventLookupResult>;
-    total: number;
+    rank: number;
+    result: Event;
+    context?: EventContext;
 }
-
-MatrixClient.prototype.fetchEvent = async function(roomId: string, eventId: string): Promise<MatrixEvent> {
-    const path = utils.encodeUri('/rooms/$roomId/event/$eventId', {
-        $roomId: roomId,
-        $eventId: eventId,
-    });
-
-    let res;
-    try {
-        res = await this._http.authedRequest(undefined, 'GET', path);
-    } catch (e) {}
-
-    if (!res || !res.event)
-        throw new Error("'event' not in '/event' result - homeserver too old?");
-
-    return this.getEventMapper()(res.event);
-};
-
-// "dumb" mapper because e2e should be decrypted in browser, so we don't lose verification status
-function mapper(cli: MatrixClient, plainOldJsObject: Event): MatrixEvent {
-    return new MatrixEvent(plainOldJsObject);
-}
-
-// XXX: use getEventTimeline once we store rooms properly
-MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventId: string): Promise<EventWithContext> {
-    const path = utils.encodeUri('/rooms/$roomId/context/$eventId', {
-        $roomId: roomId,
-        $eventId: eventId,
-    });
-
-    let res;
-    try {
-        res = await this._http.authedRequest(undefined, 'GET', path);
-    } catch (e) {}
-
-    if (!res || !res.event)
-        throw new Error("'event' not in '/event' result - homeserver too old?");
-
-    // const mapper = this.getEventMapper();
-
-    const event = mapper(this, res.event);
-
-    const state = utils.map(res.state, mapper);
-    const events_after = utils.map(res.events_after, mapper);
-    const events_before = utils.map(res.events_before, mapper);
-
-    return {
-        event,
-        context: {
-            state,
-            events_after,
-            events_before,
-        },
-    };
-};
 
 class Search {
     cli: MatrixClient;
@@ -297,50 +241,89 @@ class Search {
     }
 
     // impedance matching.
-    async resolveOne(roomId: string, eventId: string, context?: RequestEventContext): Promise<EventWithContext> {
-        if (context)
-            return await this.cli.fetchEventContext(roomId, eventId);
+    async resolveOne(roomId: string, eventId: string, context?: RequestEventContext): Promise<[Event, EventContext|undefined]> {
+        if (context) {
+            const limit = Math.max(context.after_limit || 0, context.before_limit || 0, 3);
+            const evc = await this.cli.fetchEventContext(roomId, eventId, limit);
 
-        return {
-            event: await this.cli.fetchEvent(roomId, eventId),
-        };
+            const {start, end, events_before, events_after, state} = evc.context;
+            const ctx: EventContext = {
+                start,
+                end,
+                profile_info: new Map<string, UserProfile>(),
+                events_before: events_before.map((ev: MatrixEvent) => ev.event),
+                events_after: events_after.map((ev: MatrixEvent) => ev.event),
+            };
+
+            const users = new Set<string>();
+            [...events_before, evc.event, ...events_after].forEach((ev: MatrixEvent) => {
+                users.add(ev.getSender());
+            });
+
+            state.forEach((ev: Event) => {
+                if (ev.type === 'm.room.member' && users.has(ev.state_key))
+                    ctx.profile_info.set(ev.state_key, {
+                        displayname: ev.content['displayname'],
+                        avatar_url: ev.content['avatar_url'],
+                    });
+            });
+
+            return [evc.event, ctx];
+        }
+
+        return [await this.cli.fetchEvent(roomId, eventId), undefined];
     }
 
-    // keep context as a map, so the whole thing can just be nulled.
     async resolve(rows: Array<BleveResponseRow>, context?: RequestEventContext): Promise<Array<EventLookupResult>> {
-        return [];
+        const results: Array<EventLookupResult> = [];
+
+        await Promise.all<void>(rows.map(async (row: BleveResponseRow): Promise<void> => {
+            try {
+                const [ev, ctx] = await this.resolveOne(row.roomId, row.eventId, context);
+                results.push({
+                    event: ev,
+                    context: ctx,
+                    score: row.score,
+                    highlights: row.highlights,
+                });
+            } catch (e) {}
+        }));
+
+        return results;
     }
 
-    // keys: pass straight through to go-bleve
-    // searchFilter: compute and send search rules to go-bleve
-    // roomIDsSet: used with above /\
-    // sortBy: pass straight through to go-bleve
-    // searchTerm: pass straight through to go-bleve
-    // from: pass straight through to go-bleve
-    // context: branch on whether or not to fetch context/events (js-sdk only supports context at this time iirc)
-    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<Result> {
-        const filter: Query = {
-            mustNot: new Map(),
-            must: new Map(),
-        };
+    /**
+     * @param keys {string} pass straight through to go-bleve
+     * @param searchFilter {Filter} compute and send query rules to go-bleve
+     * @param sortBy {SearchOrder} pass straight through to go-bleve
+     * @param searchTerm {string} pass straight through to go-bleve
+     * @param from {number} pass straight through to go-bleve
+     * @param context? {RequestEventContext} if defined use to fetch context after go-bleve call
+     */
+    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<[Array<EventLookupResult>, number]> {
+        const filter: Query = {};
+
+        // initialize fields we will use (we don't use should currently)
+        filter.must = new Map();
+        filter.mustNot = new Map();
 
         // must satisfy room_id
         if (searchFilter.rooms.size > 0)
-            filter.must.set('room_id', [...searchFilter.rooms]);
+            filter.must.set('room_id', searchFilter.rooms);
         if (searchFilter.notRooms.size > 0)
-            filter.mustNot.set('room_id', [...searchFilter.notRooms]);
+            filter.mustNot.set('room_id', searchFilter.notRooms);
 
         // must satisfy sender
         if (searchFilter.senders.size > 0)
-            filter.must.set('sender', [...searchFilter.senders]);
+            filter.must.set('sender', searchFilter.senders);
         if (searchFilter.notSenders.size > 0)
-            filter.mustNot.set('sender', [...searchFilter.notSenders]);
+            filter.mustNot.set('sender', searchFilter.notSenders);
 
         // must satisfy type
         if (searchFilter.types.size > 0)
-            filter.must.set('type', [...searchFilter.types]);
+            filter.must.set('type', searchFilter.types);
         if (searchFilter.notTypes.size > 0)
-            filter.mustNot.set('type', [...searchFilter.notTypes]);
+            filter.mustNot.set('type', searchFilter.notTypes);
 
         const r: BleveRequest = {
             from,
@@ -352,11 +335,7 @@ class Search {
         };
 
         const resp: BleveResponse = await b.search(r);
-        return {
-            rows: resp.rows,
-            lookup: await this.resolve(resp.rows, context),
-            total: resp.total,
-        };
+        return [await this.resolve(resp.rows, context), resp.total];
     }
 }
 
@@ -380,7 +359,7 @@ async function setup() {
         try {
             const res = await loginClient.login('m.login.password', {
                 user: '@webdevguru:matrix.org',
-                password: '***REMOVED***',
+                password: 'tlD$@5ZCUW41Y#Hg',
                 initial_device_display_name: 'Matrix Search Daemon',
             });
 
@@ -420,14 +399,14 @@ async function setup() {
 
     cli.on('event', (event: MatrixEvent) => {
         if (event.isEncrypted()) return;
-        return q.push(event);
+        return q.push(event.getClearEvent());
     });
     cli.on('Event.decrypted', (event: MatrixEvent) => {
         if (event.isDecryptionFailure()) {
-            console.warn(event);
+            console.warn(event.event);
             return;
         }
-        return q.push(event);
+        return q.push(event.getClearEvent());
     });
 
     try {
@@ -436,7 +415,6 @@ async function setup() {
         console.log(e);
     }
     cli.startClient();
-    // process.exit(1);
 
     const app = express();
     app.use(bodyParser.json());
@@ -469,7 +447,12 @@ async function setup() {
             const castBody: MatrixSearchRequest = req.body;
             const roomCat = castBody.search_categories.room_events;
 
-            let keys = ['content.body', 'content.name', 'content.topic']; // default vaue for roomCat.key
+            if (!roomCat) {
+                res.sendStatus(501);
+                return;
+            }
+
+            let keys: Array<RequestKey> = [RequestKey.body, RequestKey.name, RequestKey.topic]; // default value for roomCat.key
             if (roomCat.keys && roomCat.keys.length) keys = roomCat.keys;
 
             const includeState = Boolean(roomCat['include_state']);
@@ -480,35 +463,34 @@ async function setup() {
             if (roomCat.groupings && roomCat.groupings.group_by) {
                 roomCat.groupings.group_by.forEach(grouping => {
                     switch (grouping.key) {
-                        case 'room_id':
+                        case RequestGroupKey.roomId:
                             groupByRoomId = true;
                             break;
-                        case 'sender':
+                        case RequestGroupKey.sender:
                             groupBySender = true;
                             break;
                     }
                 });
             }
 
-            let highlights: Array<string> = [];
-
             const searchFilter = new Filter(roomCat.filter || {}); // default to empty object to assume defaults
 
-            const joinedRooms = cli.getRooms();
-            const roomIds = joinedRooms.map((room: Room) => room.roomId);
-
-            if (roomIds.length < 1) {
-                res.json({
-                    search_categories: {
-                        room_events: {
-                            highlights: [],
-                            results: [],
-                            count: 0,
-                        },
-                    },
-                });
-                return;
-            }
+            // TODO this is removed because rooms store is unreliable AF
+            // const joinedRooms = cli.getRooms();
+            // const roomIds = joinedRooms.map((room: Room) => room.roomId);
+            //
+            // if (roomIds.length < 1) {
+            //     res.json({
+            //         search_categories: {
+            //             room_events: {
+            //                 highlights: [],
+            //                 results: [],
+            //                 count: 0,
+            //             },
+            //         },
+            //     });
+            //     return;
+            // }
 
             // SKIP for now
             // let roomIdsSet = searchFilter.filterRooms(roomIds);
@@ -524,30 +506,27 @@ async function setup() {
             const roomGroups = new Map<string, GroupValue>();
             const senderGroups = new Map<string, GroupValue>();
 
-            let globalNextBatch: string|null = null;
-            let count: number = 0;
-
-            let allowedEvents: Array<string> = [];
-            const eventMap = new Map<string, Result>();
+            let globalNextBatch: string|undefined;
 
             const rooms = new Set<string>();
 
             const search = new Search(cli);
             const searchTerm = roomCat['search_term'];
 
-            let result: Result;
+            let allowedEvents: Array<EventLookupResult>;
+            let count: number = 0;
 
             // TODO extend local event map using sqlite/leveldb
             switch (roomCat['order_by']) {
                 case 'rank':
                 case '':
                     // get messages from Bleve by rank // resolve them locally
-                    result = await search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
+                    [allowedEvents, count] = await search.query(keys, searchFilter, SearchOrder.Rank, searchTerm, 0, eventContext);
                     break;
 
                 case 'recent':
                     const from = nextBatch !== null ? nextBatch.from() : 0;
-                    result = await search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
+                    [allowedEvents, count] = await search.query(keys, searchFilter, SearchOrder.Recent, searchTerm, from, eventContext);
                     // TODO get next back here
                     break;
 
@@ -569,38 +548,45 @@ async function setup() {
                 return;
             }
 
-            // const highlightsSuperset = new Set<string>();
-            // resp.rows.forEach((row: BleveResponseRow) => {
-            //     row.highlights.forEach((highlight: string) => {
-            //         highlightsSuperset.add(highlight);
-            //     });
-            // });
+            const highlightsSuperset = new Set<string>();
+            const results: Array<Result> = [];
 
-            allowedEvents.forEach((evId: string) => {
-                const res = eventMap[evId];
-                const ev = res.event;
+            allowedEvents.forEach((row: EventLookupResult) => {
+                // calculate hightlightsSuperset
+                row.highlights.forEach((highlight: string) => {
+                    highlightsSuperset.add(highlight);
+                });
+
+                const {event: ev} = row;
 
                 if (groupByRoomId) {
                     let v = roomGroups.get(ev.getRoomId());
-                    if (!v) v = new GroupValue();
-                    v.add(ev.getId(), res.order);
+                    if (!v) v = new GroupValue(row.score);
+                    v.add(ev.getId());
                     roomGroups.set(ev.getRoomId(), v);
                 }
                 if (groupBySender) {
                     let v = senderGroups.get(ev.getSender());
-                    if (!v) v = new GroupValue();
-                    v.add(ev.getId(), res.order);
+                    if (!v) v = new GroupValue(row.score);
+                    v.add(ev.getId());
                     senderGroups.set(ev.getSender(), v);
                 }
 
                 rooms.add(ev.getRoomId());
-            });
 
-            // TODO highlights calculation must remain on bleve side
+                // add to results array
+                if (results.length < searchFilter.limit)
+                    results.push({
+                        rank: row.score,
+                        result: row.event.event,
+                        context: row.context,
+                    });
+
+            });
 
             const roomStateMap = new Map<string, Array<MatrixEvent>>();
             if (includeState) {
-                // TODO fetch state from server using API
+                // TODO fetch state from server using API because js-sdk is broken due to store
                 rooms.forEach((roomId: string) => {
                     const room = cli.getRoom(roomId);
                     if (room) {
@@ -614,39 +600,59 @@ async function setup() {
                 });
             }
 
-            const results: Array<MatrixEvent> = allowedEvents.map((eventId: string) => eventMap[eventId].event);
-
-            const resp = {
-                search_categories: {
-                    room_events: {
-                        highlights: highlights,
-                        nextBatch: globalNextBatch,
-                        state: roomStateMap,
-                        results,
-                        count,
-                    },
-                },
+            const resp: MatrixSearchResponse = {
+                search_categories: {},
+            };
+            // split to make TypeScript happy with the if statements following
+            resp.search_categories.room_events = {
+                highlights: highlightsSuperset,
+                results,
+                count,
             };
 
-            if (groupByRoomId || groupBySender)
-                resp.search_categories.room_events['groups'] = new Map<string, Map<string, GroupValue>>();
+            // omitempty behaviour using if to attach onto object to be serialized
+            if (globalNextBatch) resp.search_categories.room_events.next_batch = globalNextBatch;
+            if (includeState) resp.search_categories.room_events.state = roomStateMap;
 
-            if (groupByRoomId) resp.search_categories.room_events['groups']['room_id'] = roomGroups;
-            if (groupBySender) resp.search_categories.room_events['groups']['sender'] = senderGroups;
+            if (groupByRoomId || groupBySender) {
+                resp.search_categories.room_events.groups = new Map<string, Map<string, GroupValue>>();
 
+                if (groupByRoomId) {
+                    normalizeGroupValueOrder(roomGroups.values());
+                    resp.search_categories.room_events.groups.set(RequestGroupKey.roomId, roomGroups);
+                }
+                if (groupBySender) {
+                    normalizeGroupValueOrder(senderGroups.values());
+                    resp.search_categories.room_events.groups.set(RequestGroupKey.sender, senderGroups);
+                }
+            }
+
+
+            res.status(200);
             res.json(resp);
-
+            return;
         } catch (e) {
             console.log("Catastrophe", e);
         }
 
-        console.log(req.body);
-        res.sendStatus(200);
+        res.sendStatus(500);
     });
 
     const port = 8000;
     app.listen(port, () => {
-        console.log('We are live on ' + port);
+        console.log(`We are live on ${port}`);
+    });
+}
+
+// TODO pagination
+// TODO groups-pagination
+// TODO backfill
+
+function normalizeGroupValueOrder(it: IterableIterator<GroupValue>) {
+    let i = 1;
+    Array.from(it).sort((a: GroupValue, b: GroupValue) => a.order-b.order).forEach((g: GroupValue) => {
+        // normalize order based on sort by float
+        g.order = i++;
     });
 }
 
@@ -701,7 +707,7 @@ enum RequestKey {
 interface MatrixSearchRequestBody {
     search_term: string;
     keys?: Array<RequestKey>;
-    filter?: object; // this gets upconverted to an instance of Filter
+    filter?: object; // this gets inflated to an instance of Filter
     order_by?: string;
     event_context?: RequestEventContext;
     includeState?: boolean;
@@ -710,6 +716,19 @@ interface MatrixSearchRequestBody {
 
 interface MatrixSearchRequest {
     search_categories: {
-        room_events: MatrixSearchRequestBody;
+        room_events?: MatrixSearchRequestBody;
+    }
+}
+
+interface MatrixSearchResponse {
+    search_categories: {
+        room_events?: {
+            count: number;
+            results: Array<Result>;
+            highlights: Set<string>;
+            state?: Map<string, Array<Event>>;
+            groups?: Map<string, Map<string, GroupValue>>;
+            next_batch?: string;
+        }
     }
 }
