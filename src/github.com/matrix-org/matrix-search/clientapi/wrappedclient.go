@@ -12,6 +12,19 @@ type WrappedClient struct {
 	sync.Mutex
 }
 
+type RespWhoami struct {
+	UserID string `json:"user_id"`
+}
+
+func (cli *WrappedClient) Whoami() (resp *RespWhoami, err error) {
+	cli.Lock()
+	defer cli.Unlock()
+
+	urlPath := cli.BuildURL("account", "whoami")
+	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
+	return
+}
+
 type RespJoinedRooms struct {
 	JoinedRooms []string `json:"joined_rooms"`
 }
@@ -56,11 +69,24 @@ type RespContext struct {
 	State        []*WrappedEvent   `json:"state"`
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
-	limit := 1 + beforeLimit + afterLimit
+	limit := max(beforeLimit, afterLimit) + 1
 
 	urlPath := cli.BuildURLWithQuery([]string{"rooms", roomID, "context", eventID}, map[string]string{
 		"limit": strconv.Itoa(limit),
@@ -68,8 +94,8 @@ func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimi
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 
 	if err == nil {
-		resp.EventsAfter = resp.EventsAfter[:afterLimit]
-		resp.EventsBefore = resp.EventsBefore[:beforeLimit]
+		resp.EventsAfter = resp.EventsAfter[:min(len(resp.EventsAfter), afterLimit)]
+		resp.EventsBefore = resp.EventsBefore[:min(len(resp.EventsBefore), beforeLimit)]
 	}
 
 	return
@@ -143,12 +169,7 @@ type SearchResultProcessor interface {
 	getEv() *WrappedEvent
 }
 
-type options struct {
-	Context        *RespContext
-	IncludeProfile bool
-}
-
-func (reg *RespEvGeneric) build(includeProfile bool) (r *Result) {
+func (reg *RespEvGeneric) build(includeProfile bool) (r Result) {
 	r.Result = reg.Event
 
 	ctx := reg.Context

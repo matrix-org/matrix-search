@@ -11,7 +11,6 @@ import (
 	"github.com/blevesearch/bleve/analysis/token/apostrophe"
 	"github.com/blevesearch/bleve/analysis/token/camelcase"
 	"github.com/blevesearch/bleve/analysis/token/lowercase"
-	"github.com/blevesearch/bleve/analysis/token/ngram"
 	"github.com/blevesearch/bleve/analysis/token/porter"
 	"github.com/blevesearch/bleve/analysis/tokenizer/single"
 	"github.com/blevesearch/bleve/analysis/tokenizer/unicode"
@@ -149,14 +148,6 @@ func Bleve(indexPath string) (bleve.Index, error) {
 	return bleveIdx, err
 }
 
-/*type Event struct {
-	//ID      string
-	sender  string
-	content map[string]interface{}
-	//RoomID  string
-	time time.Time
-}*/
-
 type Event map[string]interface{}
 
 func (ev *Event) Type() string {
@@ -171,27 +162,36 @@ func (ev *Event) Index(ID string, index bleve.Index) error {
 	return index.Index(ID, ev)
 }
 
+const FieldNameIsURL = "_isURL"
+const FieldNameSender = "sender"
+const FieldNameContent = "content"
+const FieldNameRoomID = "room_id"
+const FieldNameType = "type"
+const FieldNameTime = "time"
+
 func NewEvent(sender, roomID, evType string, content map[string]interface{}, time time.Time) Event {
-	//return interface{}(Event{sender, content, time})
+	_, isURL := content["url"]
+
 	return Event{
-		"sender":  sender,
-		"content": content,
-		"room_id": roomID,
-		"type":    evType,
-		"time":    time,
+		FieldNameIsURL:   isURL,
+		FieldNameSender:  sender,
+		FieldNameContent: content,
+		FieldNameRoomID:  roomID,
+		FieldNameType:    evType,
+		FieldNameTime:    time,
 	}
 }
 
-func OpenIndex(databasePath string) bleve.Index {
-	index, err := bleve.Open(databasePath)
-
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(-1)
-	}
-
-	return index
-}
+//func OpenIndex(databasePath string) bleve.Index {
+//	index, err := bleve.Open(databasePath)
+//
+//	if err != nil {
+//		log.Fatal(err)
+//		os.Exit(-1)
+//	}
+//
+//	return index
+//}
 
 //func CreateIndex(databasePath string) bleve.Index {
 //	mapping := bleve.NewIndexMapping()
@@ -252,9 +252,11 @@ func createIndexMapping() *mapping.IndexMappingImpl {
 func createEventMapping() (mapping.IndexMapping, error) {
 	indexMapping := createIndexMapping()
 
-	// a generic reusable mapping for english text
-	//englishTextFieldMapping := bleve.NewTextFieldMapping()
-	//englishTextFieldMapping.Analyzer = en.AnalyzerName
+	// generic reusable mapping for booleans
+	booleanFieldMapping := bleve.NewBooleanFieldMapping()
+	booleanFieldMapping.IncludeTermVectors = false
+	booleanFieldMapping.IncludeInAll = false
+	booleanFieldMapping.Store = false
 
 	// a generic reusable mapping for keyword text
 	keywordFieldMapping := bleve.NewTextFieldMapping()
@@ -262,8 +264,7 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	keywordFieldMapping.IncludeInAll = false
 	keywordFieldMapping.Store = false
 
-	// a specific mapping to index the description fields
-	// detected language
+	// a specific mapping to index the description fields using detected language
 	descriptionLangFieldMapping := bleve.NewTextFieldMapping()
 	descriptionLangFieldMapping.Name = "descriptionLang"
 	descriptionLangFieldMapping.Analyzer = detectlang.AnalyzerName
@@ -279,47 +280,26 @@ func createEventMapping() (mapping.IndexMapping, error) {
 	descriptionLangFieldMappingWeb.Store = false
 	descriptionLangFieldMappingWeb.IncludeInAll = false
 
+	// create mapping
 	eventMapping := bleve.NewDocumentMapping()
 
-	eventMapping.AddFieldMappingsAt("room_id", keywordFieldMapping)
-	eventMapping.AddFieldMappingsAt("sender", keywordFieldMapping)
-	eventMapping.AddFieldMappingsAt("type", keywordFieldMapping)
+	eventMapping.AddFieldMappingsAt(FieldNameRoomID, keywordFieldMapping)
+	eventMapping.AddFieldMappingsAt(FieldNameSender, keywordFieldMapping)
+	eventMapping.AddFieldMappingsAt(FieldNameType, keywordFieldMapping)
 
-	//roomIDMapping := bleve.NewTextFieldMapping()
-	//roomIDMapping.IncludeInAll = false
-	//eventMapping.AddFieldMappingsAt("room_id", roomIDMapping)
+	// whether or not the content has a `url` key i.e Boolean(content["url"]) for filter.isURL
+	eventMapping.AddFieldMappingsAt(FieldNameIsURL, booleanFieldMapping)
 
-	//contentMapping := bleve.NewTextFieldMapping()
-	//contentMapping.IncludeInAll = false
 	//eventMapping.AddFieldMappingsAt("content.body", descriptionLangFieldMapping)
-	eventMapping.AddFieldMappingsAt("content", descriptionLangFieldMapping, descriptionLangFieldMappingAlt, descriptionLangFieldMappingWeb)
+	eventMapping.AddFieldMappingsAt(FieldNameContent, descriptionLangFieldMapping, descriptionLangFieldMappingAlt, descriptionLangFieldMappingWeb)
 
-	eventMapping.AddFieldMappingsAt("time", bleve.NewDateTimeFieldMapping())
+	eventMapping.AddFieldMappingsAt(FieldNameTime, bleve.NewDateTimeFieldMapping())
 
-	indexMapping.AddDocumentMapping("event", eventMapping)
-	indexMapping.DefaultType = "event"
-
-	//indexMapping.TypeField = "room_id"
+	indexMapping.AddDocumentMapping(docTypeEvent, eventMapping)
 	indexMapping.DefaultAnalyzer = textFieldAnalyzer
+	indexMapping.DefaultType = docTypeEvent
 
 	return indexMapping, nil
 }
 
-func addCustomTokenFilter(indexMapping *mapping.IndexMappingImpl) *mapping.IndexMappingImpl {
-	err := indexMapping.AddCustomTokenFilter("bigram_tokenfilter", map[string]interface{}{
-		"type": ngram.Name,
-		//"side": ngram.FRONT,
-		"min": 3.0,
-		"max": 25.0,
-	})
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return indexMapping
-}
-
-func Execute() {
-
-}
+const docTypeEvent = "event"

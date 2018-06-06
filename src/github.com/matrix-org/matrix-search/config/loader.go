@@ -17,8 +17,7 @@ type Config struct {
 	} `yaml:"local_daemon"`
 
 	Search struct {
-		ModeAppservice bool `yaml:"mode_appservice"`
-		Stemming       struct {
+		Stemming struct {
 		} `yaml:"stemming"`
 	} `yaml:"search"`
 
@@ -38,11 +37,6 @@ type Config struct {
 	Debug struct {
 		PProf bool `yaml:"pprof"`
 	} `yaml:"debug"`
-
-	Registration struct {
-		Path string `yaml:"path"`
-		Port int    `yaml:"port"`
-	} `yaml:"registration"`
 }
 
 func LoadConfig(path string) (config *Config, err error) {

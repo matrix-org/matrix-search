@@ -10,7 +10,7 @@ This project is in rapid-development so things may change entirely day-to-day. ~
 # Local Daemon
 The project is in a working (not user friendly) state.
 To get started:
-1. Ensure you have `node` `npm`/`yarn` `go` `gb` `git` installed and working.
+1. Ensure you have `node` `npm`/`yarn` `go>=1.7` `gb` `git` installed and working.
 2. Clone this repository, and enter it
 3. build the Go portion by running `gb build`
 4. execute the created executable in the background or in another terminal; e.g `./bin/matrix-search-local &`
