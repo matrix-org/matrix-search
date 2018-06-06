@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
-	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"io"
 	"net/http"
@@ -22,7 +21,8 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 	if size := len(filterSet); size > 0 {
 		queries := make([]query.Query, 0, size)
 		for k := range filterSet {
-			qr := query.NewTermQuery(k)
+			qr := query.NewMatchQuery(k)
+			//qr := query.NewTermQuery(k)
 			qr.SetField(fieldName)
 			queries = append(queries, qr)
 		}
@@ -31,29 +31,35 @@ func generateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 	return nil
 }
 
-func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
+func qrAdd(qr *query.BooleanQuery, fieldName string, must, mustNot common.StringSet) {
+	if !must.IsEmpty() {
+		qr.AddMust(query.NewDisjunctionQuery(generateQueryList(must, fieldName)))
+	}
+	if !mustNot.IsEmpty() {
+		qr.AddMustNot(generateQueryList(mustNot, fieldName)...)
+	}
+}
+
+func qrAddBoolField(qr *query.BooleanQuery, fieldName string, value bool) {
+	q := query.NewBoolFieldQuery(value)
+	q.SetField(fieldName)
+	qr.AddMust(q)
+}
+
+func search1(index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
 	qr := bleve.NewBooleanQuery()
 
 	// Must satisfy room_id
-	qr.AddMust(query.NewDisjunctionQuery(generateQueryList(roomIDs, "room_id")))
-
+	qrAdd(qr, indexing.FieldNameRoomID, filter.Rooms, filter.NotRooms)
 	// Must satisfy sender
-	mustSenders := generateQueryList(filter.Senders, "sender")
-	if len(mustSenders) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustSenders))
-	}
-
-	// Must satisfy not sender
-	qr.AddMustNot(generateQueryList(filter.NotSenders, "sender")...)
-
+	qrAdd(qr, indexing.FieldNameSender, filter.Senders, filter.NotSenders)
 	// Must satisfy type
-	mustType := generateQueryList(filter.Types, "type")
-	if len(mustType) > 0 {
-		qr.AddMust(query.NewDisjunctionQuery(mustType))
-	}
+	qrAdd(qr, indexing.FieldNameType, filter.Types, filter.NotTypes)
 
-	// Must satisfy not type
-	qr.AddMustNot(generateQueryList(filter.NotTypes, "type")...)
+	// Must satisfy ContainsURL
+	if filter.ContainsURL != nil {
+		qrAddBoolField(qr, indexing.FieldNameIsURL, *filter.ContainsURL)
+	}
 
 	// The user-entered query string
 	if len(keys) > 0 {
@@ -64,8 +70,6 @@ func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs c
 			oneOf.AddQuery(qrs)
 		}
 		qr.AddMust(oneOf)
-	} else {
-		qr.AddMust(query.NewQueryStringQuery(strings.ToLower(searchTerm)))
 	}
 
 	sr := bleve.NewSearchRequestOptions(qr, size, from, false)
@@ -75,12 +79,12 @@ func search1(idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs c
 		//req.SortBy([]string{"-time"})
 		sr.SortByCustom(search.SortOrder{
 			&search.SortField{
-				Field: "time",
+				Field: indexing.FieldNameTime,
 				Desc:  true,
 			},
 		})
 	}
-	resp, err = idxr.Query(sr)
+	resp, err = index.Search(sr)
 	return
 }
 
@@ -93,10 +97,10 @@ func glueRoomEventIDs(ev *WrappedEvent) string {
 	return ev.RoomID + "/" + ev.ID
 }
 
-const MAX_SEARCH_RUNS = 3
+const MaxSearchRuns = 3
 
 // TODO sortBy
-func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, filter FilterPart, roomIDs common.StringSet, orderBy, searchTerm string, from int, context *RequestEventContext) (
+func searchMessages(cli *WrappedClient, index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
@@ -118,14 +122,14 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 
 	numGotten := 0
 	res = make(search.DocumentMatchCollection, 0, filter.Limit)
-	for i := 0; i < MAX_SEARCH_RUNS; i++ {
+	for i := 0; i < MaxSearchRuns; i++ {
 		// If we have reached our target within our search runs, break out of the loop
 		if numGotten >= filter.Limit {
 			break
 		}
 
 		var resp *bleve.SearchResult
-		resp, err = search1(idxr, keys, filter, roomIDs, orderBy, searchTerm, from+(i*pageSize), pageSize)
+		resp, err = search1(index, keys, filter, orderBy, searchTerm, from+(i*pageSize), pageSize)
 		if err != nil {
 			return
 		}
@@ -174,16 +178,17 @@ func searchMessages(cli *WrappedClient, idxr *indexing.Indexer, keys []string, f
 
 			// If event does not match out filter we cannot return it, so it does not count towards the limit.
 			// TODO this is really suboptimal as we can't do it at index-query time...
-			if !filter.filterEv(t.Event) {
-				continue
-			}
+			/// XXX this can now be done via index query rules
+			//if !filter.filterEv(t.Event) {
+			//	continue
+			//}
 
 			gluedID := glueRoomEventIDs(t.Event)
 			hit := hitMap[gluedID]
 
 			result := t.build(context.IncludeProfile)
 			result.Rank = hit.Score
-			roomEvMap[hit.ID] = result
+			roomEvMap[hit.ID] = &result
 
 			res = append(res, hit)
 			numGotten++
@@ -211,7 +216,7 @@ func getHTTPError(code int) *HTTPError {
 	}
 }
 
-func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) (resp *Results, err error) {
+func h(cli *WrappedClient, index bleve.Index, sr *SearchRequest, b *batch) (resp *Results, err error) {
 	roomCat := sr.SearchCategories.RoomEvents
 
 	// The actual thing to query in FTS
@@ -246,11 +251,15 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 
 	roomIDs := joinedRooms.JoinedRooms
 	// Filter room IDs
-	roomIDsSet := roomCat.Filter.filterRooms(roomIDs)
+	//roomIDsSet := roomCat.Filter.filterRooms(roomIDs)
 
 	// TODO WAT
+	//if b.isGrouping("room_id") {
+	//	roomIDsSet.Intersect(common.NewStringSet([]string{*b.GroupKey}))
+	//}
+
 	if b.isGrouping("room_id") {
-		roomIDsSet.Intersect(common.NewStringSet([]string{*b.GroupKey}))
+		searchFilter.Rooms = common.NewStringSet([]string{*b.GroupKey})
 	}
 
 	if len(roomIDs) < 1 {
@@ -292,7 +301,7 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	switch roomCat.OrderBy {
 	case "rank":
 	case "":
-		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "rank", searchTerm, 0, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, index, keys, searchFilter, "rank", searchTerm, 0, eventContext)
 		if err != nil {
 			return
 		}
@@ -326,7 +335,7 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 			}
 		}
 
-		eventMap, count, allowedEvents, err = searchMessages(cli, idxr, keys, searchFilter, roomIDsSet, "recent", searchTerm, from, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, index, keys, searchFilter, "recent", searchTerm, from, eventContext)
 
 		if len(allowedEvents) >= searchFilter.Limit {
 			// TODO fix this as HitNumber does not work for this purpose :(
@@ -446,7 +455,7 @@ func h(cli *WrappedClient, idxr *indexing.Indexer, sr *SearchRequest, b *batch) 
 	return
 }
 
-func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *batch) (resp interface{}, err error) {
+func handler(body io.ReadCloser, index bleve.Index, hsURL, token string, b *batch) (resp interface{}, err error) {
 	var sr SearchRequest
 	if body == nil {
 		err = errors.New("please send a request body")
@@ -465,7 +474,7 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 	}
 
 	var results *Results
-	results, err = h(cli, &idxr, &sr, b)
+	results, err = h(cli, index, &sr, b)
 
 	/*
 		joinedRooms, err := cli.joinedRooms()
@@ -654,17 +663,17 @@ func handler(body io.ReadCloser, idxr indexing.Indexer, hsURL, token string, b *
 	return results, err
 }
 
-func getToken(r *http.Request) (string, bool) {
+func getToken(r *http.Request) string {
 	header := r.Header.Get("Authorization")
 	if strings.HasPrefix(header, "Bearer ") {
-		return strings.TrimPrefix(header, "Bearer "), true
+		return strings.TrimPrefix(header, "Bearer ")
 	}
 
 	if keys, ok := r.URL.Query()["key"]; ok && len(keys) == 1 {
-		return keys[0], true
+		return keys[0]
 	}
 
-	return "", false
+	return ""
 }
 
 func getBatch(r *http.Request) (b *batch, err error) {
@@ -675,15 +684,50 @@ func getBatch(r *http.Request) (b *batch, err error) {
 	return
 }
 
-func RegisterLocalHandler(router *mux.Router, idxr indexing.Indexer, conf *config.Config) {
+func createClient(hsURL, token string) (wp *WrappedClient, err error) {
+	if token == "" {
+		err = errors.New("no token")
+		return
+	}
+
+	// userID gets set later using whoami call
+	wp, err = NewWrappedClient(hsURL, "", token)
+	if err != nil {
+		return
+	}
+
+	var resp *RespWhoami
+	resp, err = wp.Whoami()
+	if err != nil {
+		return
+	}
+
+	wp.UserID = resp.UserID
+	return
+}
+
+func RegisterLocalHandler(router *mux.Router, index bleve.Index) {
 	router.HandleFunc("/clientapi/search", func(w http.ResponseWriter, r *http.Request) {
-		b, err := getBatch(r)
+		// TODO replace hsURL here
+		cli, err := createClient("https://matrix.org", getToken(r))
 		if err != nil {
-			http.Error(w, err.Error(), 400)
+			http.Error(w, "no token", http.StatusUnauthorized)
 			return
 		}
 
-		resp, err := handler(r.Body, idxr, conf.Homeserver.URL, conf.LocalDaemon.AccessToken, b)
+		b, err := getBatch(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		var sr SearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&sr); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := h(cli, index, &sr, b)
 
 		if err != nil {
 			if e, ok := err.(gomatrix.HTTPError); ok {
@@ -693,46 +737,6 @@ func RegisterLocalHandler(router *mux.Router, idxr indexing.Indexer, conf *confi
 				// return
 			}
 			fmt.Println(err)
-			http.Error(w, err.Error(), 400)
-			return
-		}
-
-		//hits, err := json.Marshal(events)
-		hits, err := json.Marshal(resp)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(hits)
-	})
-}
-
-func RegisterHandler(router *mux.Router, idxr indexing.Indexer, hsURL string) {
-	router.HandleFunc("/clientapi/search/", func(w http.ResponseWriter, r *http.Request) {
-		token, ok := getToken(r)
-
-		if !ok {
-			http.Error(w, "access_token missing", http.StatusUnauthorized)
-		}
-
-		b, err := getBatch(r)
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-
-		resp, err := handler(r.Body, idxr, hsURL, token, b)
-
-		if err != nil {
-			if e, ok := err.(gomatrix.HTTPError); ok {
-				wrapped := e.WrappedError
-				fmt.Println(e, wrapped)
-				// http.Error...
-				// return
-			}
 			http.Error(w, err.Error(), 400)
 			return
 		}

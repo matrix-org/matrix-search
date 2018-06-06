@@ -8,6 +8,7 @@ import (
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
+	"github.com/matrix-org/matrix-search/clientapi"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
 	log "github.com/sirupsen/logrus"
@@ -39,11 +40,6 @@ type ResponseRow struct {
 type QueryResponse struct {
 	Rows  []ResponseRow `json:"rows"`
 	Total uint64        `json:"total"`
-}
-
-type RedactQuery struct {
-	RoomID  string `json:"roomId"`
-	EventID string `json:"eventId"`
 }
 
 func (req *QueryRequest) Valid() bool {
@@ -134,6 +130,58 @@ func makeIndexID(roomID, eventID string) string {
 	return fmt.Sprintf("%s/%s", roomID, eventID)
 }
 
+type RoomIDEventIDTuple struct {
+	RoomID  string `json:"room_id"`
+	EventID string `json:"event_id"`
+}
+
+type JobRequest struct {
+	Index  []gomatrix.Event     `json:"index"`
+	Redact []RoomIDEventIDTuple `json:"redact"`
+}
+
+func indexBatch(index bleve.Index, evs []gomatrix.Event) {
+	log.WithField("batch_size", len(evs)).Info("received batch of events to index")
+
+	for _, ev := range evs {
+		if ev.Type != "m.room.message" {
+			continue
+		}
+
+		ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
+		iev := indexing.NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
+
+		logger := log.WithFields(log.Fields{
+			"room_id":  ev.RoomID,
+			"event_id": ev.ID,
+		})
+
+		if err := index.Index(makeIndexID(ev.RoomID, ev.ID), iev); err != nil {
+			// TODO keep a list of these maybe as missing events are not good
+			logger.WithError(err).Error("failed to index event")
+		} else {
+			logger.Info("successfully indexed event")
+		}
+	}
+}
+
+func redactBatch(index bleve.Index, tuples []RoomIDEventIDTuple) {
+	for _, tuple := range tuples {
+		logger := log.WithFields(log.Fields{
+			"room_id":  tuple.RoomID,
+			"event_id": tuple.EventID,
+		})
+
+		if err := index.Delete(makeIndexID(tuple.RoomID, tuple.EventID)); err != nil {
+			logger.WithError(err).Error("failed to redact index")
+			// TODO handle error better here
+			continue
+		}
+
+		logger.Info("redacted index successfully")
+	}
+}
+
 func main() {
 	// force colours on the logrus standard logger
 	log.StandardLogger().Formatter = &log.TextFormatter{ForceColors: true}
@@ -142,6 +190,17 @@ func main() {
 
 	router := mux.NewRouter()
 	router.StrictSlash(true)
+
+	router.HandleFunc("/api/enqueue", func(w http.ResponseWriter, r *http.Request) {
+		var req JobRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.WithField("path", "/api/enqueue").WithError(err).Error("failed to decode request body")
+			return
+		}
+
+		indexBatch(index, req.Index)
+		redactBatch(index, req.Redact)
+	})
 
 	router.HandleFunc("/api/index", func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
@@ -152,28 +211,7 @@ func main() {
 			return
 		}
 
-		log.WithField("batch_size", len(evs)).Info("received batch of events to index")
-
-		for _, ev := range evs {
-			if ev.Type != "m.room.message" {
-				continue
-			}
-
-			ts := time.Unix(0, ev.Timestamp*int64(time.Millisecond))
-			iev := indexing.NewEvent(ev.Sender, ev.RoomID, ev.Type, ev.Content, ts)
-
-			logger := log.WithFields(log.Fields{
-				"room_id":  ev.RoomID,
-				"event_id": ev.ID,
-			})
-
-			if err := index.Index(makeIndexID(ev.RoomID, ev.ID), iev); err != nil {
-				// TODO keep a list of these maybe as missing events are not good
-				logger.WithError(err).Error("failed to index event")
-			} else {
-				logger.Info("successfully indexed event")
-			}
-		}
+		indexBatch(index, evs)
 
 		w.WriteHeader(http.StatusOK)
 	}).Methods(http.MethodPut)
@@ -231,27 +269,7 @@ func main() {
 		json.NewEncoder(w).Encode(res)
 	}).Methods(http.MethodPost)
 
-	router.HandleFunc("/api/redact", func(w http.ResponseWriter, r *http.Request) {
-		var req RedactQuery
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			log.WithField("path", "/api/redact").WithError(err).Error("failed to decode request body")
-			return
-		}
-
-		logger := log.WithFields(log.Fields{
-			"room_id":  req.RoomID,
-			"event_id": req.EventID,
-		})
-
-		if err := index.Delete(makeIndexID(req.RoomID, req.EventID)); err != nil {
-			logger.WithError(err).Error("failed to redact index")
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		logger.Info("redacted index successfully")
-		w.WriteHeader(http.StatusOK)
-	}).Methods(http.MethodDelete)
+	clientapi.RegisterLocalHandler(router, index)
 
 	bind := ":9999"
 

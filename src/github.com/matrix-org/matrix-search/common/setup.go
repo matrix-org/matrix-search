@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrix"
-	"github.com/matrix-org/matrix-search/appservice"
 	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"log"
@@ -40,24 +39,6 @@ func LoadConfig() (conf *config.Config) {
 		fmt.Printf("Unable to load config file: %v\n", err)
 		os.Exit(-1)
 	}
-	return
-}
-
-func LoadConfigs() (conf *config.Config, reg *appservice.Registration) {
-	parse()
-
-	var err error
-
-	if reg, err = appservice.LoadRegistration(*pathPtr); err != nil {
-		fmt.Printf("Unable to load registration file: %v\n", err)
-		os.Exit(-1)
-	}
-
-	if conf, err = config.LoadConfig(*configPathPtr); err != nil {
-		fmt.Printf("Unable to load config file: %v\n", err)
-		os.Exit(-1)
-	}
-
 	return
 }
 
