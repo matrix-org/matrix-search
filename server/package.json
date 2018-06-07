@@ -17,6 +17,7 @@
     "@types/body-parser": "^1.17.0",
     "@types/cors": "^2.8.4",
     "@types/express": "^4.11.1",
+    "@types/mkdirp": "^0.5.2",
     "@types/node": "^9.6.0",
     "@types/request-promise": "^4.1.41",
     "argv": "0.0.2",
