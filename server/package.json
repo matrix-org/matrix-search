@@ -19,6 +19,7 @@
     "@types/express": "^4.11.1",
     "@types/mkdirp": "^0.5.2",
     "@types/node": "^9.6.0",
+    "@types/request": "^2.47.0",
     "@types/request-promise": "^4.1.41",
     "argv": "0.0.2",
     "better-queue": "^3.8.6",
