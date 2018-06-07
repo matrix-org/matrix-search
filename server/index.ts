@@ -6,7 +6,6 @@ declare var global: {
     atob: (string) => string;
 };
 
-// import * as request from "request-promise";
 import argv from 'argv';
 import {RequestPromise, RequestPromiseOptions} from "request-promise";
 import cors from 'cors';
@@ -15,9 +14,7 @@ import bodyParser from 'body-parser';
 import * as mkdirp from "mkdirp";
 
 import {RequestAPI, RequiredUriUrl} from "request";
-// import sqlite3 from 'sqlite3';
 
-// const indexeddbjs = require('indexeddb-js');
 const Queue = require('better-queue');
 const SqliteStore = require('better-queue-sqlite');
 const request = require('request-promise');
@@ -53,18 +50,7 @@ import './matrix_client_ext';
 // side-effect upgrade Map and Set prototypes
 import './builtin_ext';
 
-let indexedDB;
-
-// const engine = new sqlite3.Database('./store/indexedb.sqlite');
-// const scope = indexeddbjs.makeScope('sqlite3', engine);
-// indexedDB = scope.indexedDB;
-
-if (indexedDB) {
-    // setCryptoStoreFactory(() => new IndexedDBCryptoStore(indexedDB, 'matrix-js-sdk:crypto'));
-    // setCryptoStoreFactory(() => new IndexedDBCryptoStore(null));
-} else {
-    setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
-}
+setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 
 argv.option([
     {
@@ -367,6 +353,8 @@ enum SearchOrder {
 async function setup() {
     const args = argv.run();
 
+    const baseUrl = args.options['url'] || 'https://matrix.org';
+
     let creds = {
         userId: global.localStorage.getItem('userId'),
         deviceId: global.localStorage.getItem('deviceId'),
@@ -380,9 +368,7 @@ async function setup() {
             process.exit(-1);
         }
 
-        const loginClient = createClient({
-            baseUrl: args.options['url'] || 'https://matrix.org',
-        });
+        const loginClient = createClient({baseUrl});
 
         try {
             const res = await loginClient.login('m.login.password', {
@@ -409,16 +395,10 @@ async function setup() {
     }
 
     const cli = createClient({
-        baseUrl: 'https://matrix.org',
+        baseUrl,
         idBaseUrl: '',
         ...creds,
         useAuthorizationHeader: true,
-        // sessionStore: new LevelStore(),
-        // store: new IndexedDBStore({
-        //     indexedDB: indexedDB,
-        //     dbName: 'matrix-search-sync',
-        //     localStorage: global.localStorage,
-        // }),
         store: new MatrixInMemoryStore({
             localStorage: global.localStorage,
         }),
