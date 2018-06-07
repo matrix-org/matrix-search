@@ -36,3 +36,4 @@ persist.json
 node_modules/
 js_fetcher/store/
 vendor/pkg/
+credentials
