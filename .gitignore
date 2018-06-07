@@ -39,3 +39,4 @@ server/queue
 server/store.sqlite
 server/store/
 vendor/pkg/
+credentials
