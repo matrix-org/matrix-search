@@ -1,11 +1,10 @@
-import {EventContext, UserProfile} from "./typings/matrix-js-sdk";
-
 declare var global: {
     Olm: any
     localStorage?: any
     atob: (string) => string;
 };
 
+import get from 'lodash.get';
 import argv from 'argv';
 import {RequestPromise, RequestPromiseOptions} from "request-promise";
 import cors from 'cors';
@@ -14,6 +13,31 @@ import bodyParser from 'body-parser';
 import * as mkdirp from "mkdirp";
 
 import {RequestAPI, RequiredUriUrl} from "request";
+
+// import Olm before importing js-sdk to prevent it crying
+global.Olm = require('olm');
+
+import {
+    Room,
+    Event,
+    Filter,
+    Matrix,
+    MatrixEvent,
+    UserProfile,
+    createClient,
+    EventContext,
+    MatrixClient,
+    IndexedDBStore,
+    EventWithContext,
+    MatrixInMemoryStore,
+    IndexedDBCryptoStore,
+    setCryptoStoreFactory,
+    WebStorageSessionStore,
+} from 'matrix-js-sdk';
+// side-effect upgrade MatrixClient prototype
+import './matrix_client_ext';
+// side-effect upgrade Map and Set prototypes
+import './builtin_ext';
 
 const Queue = require('better-queue');
 const SqliteStore = require('better-queue-sqlite');
@@ -26,29 +50,6 @@ mkdirp.sync('./store');
 // Loading localStorage module
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
     global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
-
-// import Olm before importing js-sdk to prevent it crying
-global.Olm = require('olm');
-
-import {
-    Room,
-    Event,
-    Matrix,
-    MatrixEvent,
-    createClient,
-    MatrixClient,
-    IndexedDBStore,
-    EventWithContext,
-    MatrixInMemoryStore,
-    IndexedDBCryptoStore,
-    setCryptoStoreFactory,
-    WebStorageSessionStore,
-} from 'matrix-js-sdk';
-
-// side-effect upgrade MatrixClient prototype
-import './matrix_client_ext';
-// side-effect upgrade Map and Set prototypes
-import './builtin_ext';
 
 setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 
@@ -76,12 +77,19 @@ class BleveHttp {
     request: RequestAPI<RequestPromise, RequestPromiseOptions, RequiredUriUrl>;
 
     constructor(baseUrl: string) {
-        this.request = request.defaults({
-            baseUrl,
+        this.request = request.defaults({baseUrl});
+    }
+
+    enqueue(events: Array<Event>) {
+        return this.request({
+            url: 'enqueue',
+            method: 'POST',
+            json: true,
+            body: events,
         });
     }
 
-    search(req: BleveRequest){
+    search(req: BleveRequest) {
         return this.request({
             url: 'query',
             method: 'POST',
@@ -89,40 +97,36 @@ class BleveHttp {
             body: req,
         });
     }
-
-    index(events: Event[]) {
-        return this.request({
-            url: 'index',
-            method: 'PUT',
-            json: true,
-            body: events,
-        });
-    }
 }
 
 const b = new BleveHttp("http://localhost:9999/api/");
 
-const q = new Queue(async (batch: Event[], cb) => {
+function indexable(ev: Event): boolean {
+    return indexableKeys.some((key: string) => get(ev, key) !== undefined);
+}
+
+const q = new Queue(async (batch: Array<Event>, cb) => {
     try {
-        cb(null, await b.index(batch));
+        cb(null, await b.enqueue(batch));
     } catch (e) {
         cb(e);
     }
 }, {
     batchSize: 100,
-    maxRetries: 10,
-    retryDelay: 1000,
+    maxRetries: 100,
+    retryDelay: 5000,
     store: new SqliteStore({
         path: './store/queue.sqlite',
     }),
-    filter: (event: Event, cb) => {
-        if (event.type !== 'm.room.message') return cb('not m.room.message');
-        return cb(null, event);
-    }
 });
 
-q.on('task_accepted', function(taskId: string, ev: Event) {
-    console.info(`Enqueue event ${ev.room_id}/${ev.event_id} ${ev.sender} [${ev.type}] (${taskId})`);
+q.on('task_queued', function(taskId: string, ev: Event) {
+    const {room_id, event_id, sender, type} = ev;
+    if (ev.redacts) {
+        console.info(`Enqueue event for redaction ${room_id}/${event_id} (${taskId})`);
+    } else {
+        console.info(`Enqueue event for indexing ${room_id}/${event_id} ${sender} [${type}] (${taskId})`);
+    }
 });
 
 q.on('batch_failed', function(err) {
@@ -306,7 +310,7 @@ class Search {
      * @param from {number} pass straight through to go-bleve
      * @param context? {RequestEventContext} if defined use to fetch context after go-bleve call
      */
-    async query(keys: Array<string>, searchFilter: Filter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<[Array<EventLookupResult>, number]> {
+    async query(keys: Array<string>, searchFilter: SearchFilter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<[Array<EventLookupResult>, number]> {
         const filter: Query = {};
 
         // initialize fields we will use (we don't use should currently)
@@ -368,7 +372,7 @@ async function setup() {
             process.exit(-1);
         }
 
-        const loginClient = createClient({baseUrl});
+        const loginClient: MatrixClient = createClient({baseUrl});
 
         try {
             const res = await loginClient.login('m.login.password', {
@@ -394,7 +398,7 @@ async function setup() {
         }
     }
 
-    const cli = createClient({
+    const cli: MatrixClient = createClient({
         baseUrl,
         idBaseUrl: '',
         ...creds,
@@ -407,22 +411,88 @@ async function setup() {
 
     cli.on('event', (event: MatrixEvent) => {
         if (event.isEncrypted()) return;
-        return q.push(event.getClearEvent());
+
+        const cev = event.getClearEvent();
+        // if event can be redacted or is a redaction then enqueue it for processing
+        if (event.getType() === "m.room.redaction" || !indexable(cev)) return;
+        return q.push(cev);
     });
     cli.on('Event.decrypted', (event: MatrixEvent) => {
         if (event.isDecryptionFailure()) {
             console.warn(event.event);
             return;
         }
-        return q.push(event.getClearEvent());
+
+        const cev = event.getClearEvent();
+        if (!indexable(cev)) return;
+        return q.push(cev);
+    });
+
+    // cli.on('Room.redaction', (event: MatrixEvent) => {
+    //     return q.push({
+    //         type: JobType.redact,
+    //         event: event.getClearEvent(),
+    //     });
+    // });
+
+    try {
+        console.info("initializing crypto");
+        await cli.initCrypto();
+    } catch (e) {
+        console.error("Failed to init crypto.");
+        console.error(e);
+        process.exit(-1);
+    }
+    console.info("crypto initialized");
+
+    // create sync filter
+    const filter = new Filter(cli.credentials.userId);
+    filter.setDefinition({
+        room: {
+            include_leave: false, // TODO: not sure here
+            ephemeral: { // we don't care about ephemeral events
+                limit: 0,
+                types: [],
+            },
+            account_data: { // we don't care about room account_data
+                limit: 0,
+                types: [],
+            },
+            // state: { // TODO: do we care about state
+            //     limit: 0,
+            //     types: [],
+            // },
+            // timeline: { // TODO do we want all timeline evs
+            //
+            // }
+        },
+        presence: { // we don't care about presence
+            limit: 0,
+            types: [],
+        },
+        account_data: { // we don't care about global account_data
+            limit: 0,
+            types: [],
+        },
     });
 
     try {
-        await cli.initCrypto();
+        console.info("loading/creating sync filter");
+        filter.filterId = await cli.getOrCreateFilter(filterName(cli), filter);
     } catch (e) {
-        console.log(e);
+        console.error("Failed to getOrCreate sync filter.");
+        console.error(e);
+        process.exit(-1);
     }
-    cli.startClient();
+    console.info("sync filter loaded");
+
+    console.info("starting client");
+    // filter sync to improve performance
+    cli.startClient({
+        disablePresence: true,
+        filter,
+    });
+    console.info("client started");
 
     const app = express();
     app.use(bodyParser.json());
@@ -481,7 +551,7 @@ async function setup() {
                 });
             }
 
-            const searchFilter = new Filter(roomCat.filter || {}); // default to empty object to assume defaults
+            const searchFilter = new SearchFilter(roomCat.filter || {}); // default to empty object to assume defaults
 
             // TODO this is removed because rooms store is unreliable AF
             // const joinedRooms = cli.getRooms();
@@ -656,6 +726,10 @@ async function setup() {
 // TODO groups-pagination
 // TODO backfill
 
+function filterName(cli: MatrixClient): string {
+    return `MATRIX_SEARCH_FILTER_${cli.credentials.userId}`;
+}
+
 function normalizeGroupValueOrder(it: IterableIterator<GroupValue>) {
     let i = 1;
     Array.from(it).sort((a: GroupValue, b: GroupValue) => a.order-b.order).forEach((g: GroupValue) => {
@@ -664,7 +738,7 @@ function normalizeGroupValueOrder(it: IterableIterator<GroupValue>) {
     });
 }
 
-class Filter {
+class SearchFilter {
     rooms: Set<string>;
     notRooms: Set<string>;
     senders: Set<string>;
@@ -711,6 +785,8 @@ enum RequestKey {
     name = "content.name",
     topic = "content.topic",
 }
+
+const indexableKeys = [RequestKey.body, RequestKey.name, RequestKey.topic];
 
 interface MatrixSearchRequestBody {
     search_term: string;
