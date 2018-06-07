@@ -29,6 +29,6 @@ appropriate homeserver url, username and password).
 Then you can build and run the docker image like so:
 
 ```
-$ docker build . -t matrix-search
+$ docker build -t matrix-search .
 $ docker run -p 8000:8000 --env-file credentials matrix-search
 ```
