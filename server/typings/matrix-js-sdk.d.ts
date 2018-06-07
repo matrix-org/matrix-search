@@ -54,6 +54,21 @@ export interface EventWithContext {
     };
 }
 
+export enum PendingEventOrder {
+    chronological = "chronological",
+    detached = "detached",
+}
+
+export interface StartClientOpts {
+    initialSyncLimit?: number; // default: 8
+    includeArchivedRooms?: boolean; // default: false
+    resolveInvitesToProfiles?: boolean; // default: false
+    pendingEventOrdering?: PendingEventOrder; // default: chronological
+    pollTimeout?: number; // default: 30000
+    filter?: Filter; // default: None
+    disablePresence?: boolean; // default: false
+}
+
 export class MatrixClient {
     constructor(opts: MatrixClientOpts);
 
@@ -61,8 +76,11 @@ export class MatrixClient {
 
     private _requestTokenFromEndpoint(endpoint: string, params: object): Promise<string>
 
+    // custom
     fetchEvent(roomId: string, eventId: string): Promise<MatrixEvent>;
     fetchEventContext(roomId: string, eventId: string, limit: number): Promise<EventWithContext>
+
+    startClient(opts: StartClientOpts|number); // backwards compat with historyLen
 
     acceptGroupInvite(groupId: string, opts: object): Promise<object> | MatrixError;
     addListener(event: string, listener: any);
@@ -150,8 +168,71 @@ export class ContentRepo {
 
 }
 
-export class Filter {
+export class FilterComponent {
+    constructor(filter_json: object);
 
+    private _checkFields(room_id: string, sender: string, event_type: string, contains_url: string): boolean;
+    check(event: MatrixEvent): boolean;
+    filter(events: Array<MatrixEvent>): Array<MatrixEvent>;
+    limit(): number;
+}
+
+export enum EventFormat {
+    client = "client",
+    federation = "federation",
+}
+
+export interface FilterJson {
+    limit?: number;
+    not_senders?: Array<string>;
+    not_types?: Array<string>;
+    senders?: Array<string>;
+    types?: Array<string>;
+}
+
+export interface RoomEventFilterJson {
+    limit?: number;
+    not_senders?: Array<string>;
+    not_types?: Array<string>;
+    not_rooms?: Array<string>;
+    senders?: Array<string>;
+    types?: Array<string>;
+    rooms?: Array<string>;
+    contains_url?: boolean; // default: undefined
+}
+
+export interface RoomFilterJson {
+    not_rooms?: Array<string>;
+    rooms?: Array<string>;
+    ephemeral?: RoomEventFilterJson;
+    include_leave?: boolean; // default: false
+    state?: RoomEventFilterJson;
+    timeline?: RoomEventFilterJson;
+    account_data?: RoomEventFilterJson;
+}
+
+export interface FilterDefinition {
+    event_fields?: Array<string>; // default: *all*
+    event_format?: EventFormat; // default: client
+    presence?: FilterJson; // default: *all*
+    account_data?: FilterJson; // default: *all*
+    room?: RoomFilterJson; // default: *all*
+}
+
+export class Filter {
+    userId: string;
+    filterId?: string;
+
+    constructor(userId: string, filterId?: string);
+    static fromJson(userId: string, filterId: string, jsonObj: object): Filter;
+
+    filterRoomTimeline(events: Array<MatrixEvent>): Array<MatrixEvent>;
+    getDefinition(): object;
+    getFilterId(): string | undefined;
+    getRoomTimelineFilterComponent(): FilterComponent;
+    setDefinition(definition: FilterDefinition);
+    setIncludeLeaveRooms(includeLeave: boolean);
+    setTimelineLimit(limit: number);
 }
 
 export class TimelineWindow {
@@ -187,7 +268,7 @@ export type MatrixClientOpts = {
     cryptoStore?: ICryptoStore;
 }
 
-export type CreateClientOps = {
+export type CreateClientOpts = {
     store: IMatrixStore,
     scheduler: IMatrixScheduler,
     request: ()=>void,
@@ -263,7 +344,7 @@ export interface IMatrixScheduler {
 
 // Global Functions
 
-// function createClient(opts: CreateClientOps|String): MatrixClient {
+export function createClient(opts: CreateClientOpts): MatrixClient;
 
 // Export Models and Stores that are global.
 // }
@@ -297,8 +378,10 @@ declare namespace Matrix.Models {
     export class Event {
         sender: string;
         room_id: string;
+        event_id: string;
         content: object;
         state_key?: string;
+        redacts?: string;
         type: string;
 
         private _clearEvent: object;
