@@ -130,17 +130,7 @@ func makeIndexID(roomID, eventID string) string {
 	return fmt.Sprintf("%s/%s", roomID, eventID)
 }
 
-type RoomIDEventIDTuple struct {
-	RoomID  string `json:"room_id"`
-	EventID string `json:"event_id"`
-}
-
-type JobRequest struct {
-	Index  []gomatrix.Event     `json:"index"`
-	Redact []RoomIDEventIDTuple `json:"redact"`
-}
-
-func indexBatch(index bleve.Index, evs []gomatrix.Event) {
+func indexBatch(index bleve.Index, evs []*gomatrix.Event) {
 	log.WithField("batch_size", len(evs)).Info("received batch of events to index")
 
 	for _, ev := range evs {
@@ -165,14 +155,17 @@ func indexBatch(index bleve.Index, evs []gomatrix.Event) {
 	}
 }
 
-func redactBatch(index bleve.Index, tuples []RoomIDEventIDTuple) {
-	for _, tuple := range tuples {
+func redactBatch(index bleve.Index, evs []*gomatrix.Event) {
+	log.WithField("batch_size", len(evs)).Info("received batch of events to redact")
+
+	for _, ev := range evs {
 		logger := log.WithFields(log.Fields{
-			"room_id":  tuple.RoomID,
-			"event_id": tuple.EventID,
+			"room_id":  ev.RoomID,
+			"event_id": ev.ID,
+			"redacts":  ev.Redacts,
 		})
 
-		if err := index.Delete(makeIndexID(tuple.RoomID, tuple.EventID)); err != nil {
+		if err := index.Delete(makeIndexID(ev.RoomID, ev.Redacts)); err != nil {
 			logger.WithError(err).Error("failed to redact index")
 			// TODO handle error better here
 			continue
@@ -192,19 +185,34 @@ func main() {
 	router.StrictSlash(true)
 
 	router.HandleFunc("/api/enqueue", func(w http.ResponseWriter, r *http.Request) {
-		var req JobRequest
+		var req []gomatrix.Event
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			log.WithField("path", "/api/enqueue").WithError(err).Error("failed to decode request body")
 			return
 		}
 
-		indexBatch(index, req.Index)
-		redactBatch(index, req.Redact)
-	})
+		toIndex := make([]*gomatrix.Event, 0, len(req))
+		toRedact := make([]*gomatrix.Event, 0, len(req))
+
+		for i := range req {
+			if req[i].Redacts == "" {
+				toIndex = append(toIndex, &req[i])
+			} else {
+				toRedact = append(toRedact, &req[i])
+			}
+		}
+
+		if len(toIndex) > 0 {
+			indexBatch(index, toIndex)
+		}
+		if len(toRedact) > 0 {
+			redactBatch(index, toRedact)
+		}
+	}).Methods(http.MethodPost)
 
 	router.HandleFunc("/api/index", func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
-		var evs []gomatrix.Event
+		var evs []*gomatrix.Event
 
 		if err := decoder.Decode(&evs); err != nil {
 			log.WithField("path", "/api/index").WithError(err).Error("failed to decode request body")

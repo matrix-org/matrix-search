@@ -7,7 +7,7 @@
 package cld2
 
 // #cgo LDFLAGS: -lstdc++
-// #cgo CPPFLAGS: -std=c++98
+// #cgo CXXFLAGS: -std=c++98
 // #include <stdlib.h>
 // #include "cld2.h"
 import "C"
