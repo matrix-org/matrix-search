@@ -4,13 +4,14 @@ declare var global: {
     atob: (string) => string;
 };
 
-import get from 'lodash.get';
 import argv from 'argv';
-import {RequestPromise, RequestPromiseOptions} from "request-promise";
 import cors from 'cors';
-import express, {Request, Response} from "express";
+import get from 'lodash.get';
+import * as winston from 'winston';
+import * as mkdirp from 'mkdirp';
 import bodyParser from 'body-parser';
-import * as mkdirp from "mkdirp";
+import express, {Request, Response} from 'express';
+import {RequestPromise, RequestPromiseOptions} from 'request-promise';
 
 import {RequestAPI, RequiredUriUrl} from "request";
 
@@ -73,6 +74,13 @@ argv.option([
     }
 ]);
 
+const logger = new winston.Logger({
+    level: 'info',
+    transports: [
+        new winston.transports.Console({colorize: true})
+    ]
+});
+
 class BleveHttp {
     request: RequestAPI<RequestPromise, RequestPromiseOptions, RequiredUriUrl>;
 
@@ -120,20 +128,29 @@ const q = new Queue(async (batch: Array<Event>, cb) => {
     }),
 });
 
-q.on('task_queued', function(taskId: string, ev: Event) {
+q.on('task_queued', function(task_id: string, ev: Event) {
     const {room_id, event_id, sender, type} = ev;
     if (ev.redacts) {
-        console.info(`Enqueue event for redaction ${room_id}/${event_id} (${taskId})`);
+        logger.info('enqueue event for redaction', {room_id, event_id, task_id});
     } else {
-        console.info(`Enqueue event for indexing ${room_id}/${event_id} ${sender} [${type}] (${taskId})`);
+        logger.info('enqueue event for indexing', {room_id, event_id, sender, type, task_id});
     }
 });
 
-q.on('batch_failed', function(err) {
-    console.error("[ERROR] Batch failed: ", err);
+q.on('batch_failed', function(error) {
+    logger.error('batch failed', {error});
 });
 
-setup().then(console.log).catch(console.error);
+setup().then();
+
+// debug disable js-sdk log spam
+const disableConsoleLogger = false;
+if (disableConsoleLogger) {
+    console.log = function(){};
+    console.warn = function(){};
+    console.error = function(){};
+    console.error = function(){};
+}
 
 interface GroupValueJSON {
     order: number;
@@ -367,7 +384,7 @@ async function setup() {
 
     if (!creds.userId || !creds.deviceId || !creds.accessToken) {
         if (!args.options['username'] || !args.options['password']) {
-            console.log('Username and Password were not specified on the commandline and none were saved');
+            logger.error('username and password were not specified on the commandline and none were saved');
             argv.help();
             process.exit(-1);
         }
@@ -381,7 +398,7 @@ async function setup() {
                 initial_device_display_name: 'Matrix Search Daemon',
             });
 
-            console.log('Logged in as ' + res.user_id);
+            logger.info('logged in', {user_id: res.user_id});
             global.localStorage.setItem('userId', res.user_id);
             global.localStorage.setItem('deviceId', res.device_id);
             global.localStorage.setItem('accessToken', res.access_token);
@@ -391,9 +408,8 @@ async function setup() {
                 deviceId: res.device_id,
                 accessToken: res.access_token,
             };
-        } catch (err) {
-            console.log('An error occured logging in!');
-            console.log(err);
+        } catch (error) {
+            logger.error('an error occurred logging in', {error});
             process.exit(1);
         }
     }
@@ -419,7 +435,7 @@ async function setup() {
     });
     cli.on('Event.decrypted', (event: MatrixEvent) => {
         if (event.isDecryptionFailure()) {
-            console.warn(event.event);
+            logger.warn('decryption failure', {event: event.event});
             return;
         }
 
@@ -436,14 +452,13 @@ async function setup() {
     // });
 
     try {
-        console.info("initializing crypto");
+        logger.info('initializing crypto');
         await cli.initCrypto();
-    } catch (e) {
-        console.error("Failed to init crypto.");
-        console.error(e);
+    } catch (error) {
+        logger.error('failed to init crypto', {error});
         process.exit(-1);
     }
-    console.info("crypto initialized");
+    logger.info('crypto initialized');
 
     // create sync filter
     const filter = new Filter(cli.credentials.userId);
@@ -477,22 +492,21 @@ async function setup() {
     });
 
     try {
-        console.info("loading/creating sync filter");
+        logger.info('loading/creating sync filter');
         filter.filterId = await cli.getOrCreateFilter(filterName(cli), filter);
-    } catch (e) {
-        console.error("Failed to getOrCreate sync filter.");
-        console.error(e);
+    } catch (error) {
+        logger.error('failed to getOrCreate sync filter', {error});
         process.exit(-1);
     }
-    console.info("sync filter loaded");
+    logger.info('sync filter loaded', {filter_id: filter.getFilterId()});
 
-    console.info("starting client");
+    logger.info('starting client');
     // filter sync to improve performance
     cli.startClient({
         disablePresence: true,
         filter,
     });
-    console.info("client started");
+    logger.info('client started');
 
     const app = express();
     app.use(bodyParser.json());
@@ -514,9 +528,9 @@ async function setup() {
         if (req.query['next_batch']) {
             try {
                 nextBatch = JSON.parse(global.atob(req.query['next_batch']));
-                console.info("Found next batch of", nextBatch);
-            } catch (e) {
-                console.error("Failed to parse next_batch argument", e);
+                logger.info('found next batch of', {next_batch: nextBatch});
+            } catch (error) {
+                logger.error('failed to parse next_batch argument', {error});
             }
         }
 
@@ -709,8 +723,8 @@ async function setup() {
             res.status(200);
             res.json(resp);
             return;
-        } catch (e) {
-            console.log("Catastrophe", e);
+        } catch (error) {
+            logger.error('catastrophe', {error});
         }
 
         res.sendStatus(500);
@@ -718,7 +732,7 @@ async function setup() {
 
     const port = args.options['port'] || 8000;
     app.listen(port, () => {
-        console.log(`We are live on ${port}`);
+        logger.info('we are live', {port});
     });
 }
 
