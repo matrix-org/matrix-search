@@ -1,11 +1,38 @@
 package clientapi
 
-import "github.com/matrix-org/gomatrix"
+import (
+	"github.com/gin-gonic/gin/json"
+	"github.com/matrix-org/gomatrix"
+	"sort"
+)
 
 type GroupValue struct {
 	NextBatch *string  `json:"next_batch,omitempty"`
-	Order     float64  `json:"order,omitempty"`
-	Results   []string `json:"results,omitempty"`
+	Order     float64  `json:"order"`
+	Results   []string `json:"results"`
+}
+
+type NormalizedGroupValue struct {
+	NextBatch *string  `json:"next_batch,omitempty"`
+	Order     int      `json:"order"`
+	Results   []string `json:"results"`
+}
+
+type KeyOrderTuple struct {
+	Key   string
+	Order float64
+}
+
+type KeyOrderTupleList []KeyOrderTuple
+
+func (l KeyOrderTupleList) Len() int {
+	return len(l)
+}
+func (l KeyOrderTupleList) Swap(i, j int) {
+	l[i], l[j] = l[j], l[i]
+}
+func (l KeyOrderTupleList) Less(i, j int) bool {
+	return l[i].Order < l[i].Order
 }
 
 func (sg *GroupValue) addResult(res string) {
@@ -22,6 +49,26 @@ func (gvm GroupValueMap) add(key, id string, order float64) {
 		}
 	}
 	gvm[key].addResult(id)
+}
+
+func (gvm GroupValueMap) MarshalJSON() ([]byte, error) {
+	list := make(KeyOrderTupleList, 0, len(gvm))
+	normalized := make(map[string]*NormalizedGroupValue, len(gvm))
+
+	for k, v := range gvm {
+		list = append(list, KeyOrderTuple{k, v.Order})
+		normalized[k] = &NormalizedGroupValue{
+			NextBatch: v.NextBatch,
+			Results:   v.Results,
+		}
+	}
+	sort.Sort(list)
+
+	for i := range list {
+		normalized[list[i].Key].Order = i + 1
+	}
+
+	return json.Marshal(normalized)
 }
 
 type UserProfile struct {
