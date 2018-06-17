@@ -20,8 +20,8 @@ RUN apk add --update nodejs nodejs-npm
 # Python and make node gyp :(
 RUN apk add --update python make
 
-COPY server /node/server
-WORKDIR /node/server
+COPY js_fetcher /node/js_fetcher
+WORKDIR /node/js_fetcher
 RUN npm i
 
 # -- Scripts ------------------------------------v
