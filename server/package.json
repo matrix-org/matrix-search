@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node %NODE_DEBUG_OPTION% --trace-warnings index.js"
+    "start": "cross-env-shell node $NODE_DEBUG_OPTION --trace-warnings index.js"
   },
   "repository": {
     "type": "git",
@@ -13,17 +13,6 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@types/argv": "0.0.4",
-    "@types/body-parser": "^1.17.0",
-    "@types/cors": "^2.8.4",
-    "@types/express": "^4.11.1",
-    "@types/lodash": "^4.14.109",
-    "@types/lodash.get": "^4.4.3",
-    "@types/mkdirp": "^0.5.2",
-    "@types/node": "^9.6.0",
-    "@types/request": "^2.47.0",
-    "@types/request-promise": "^4.1.41",
-    "@types/winston": "^2.3.9",
     "argv": "0.0.2",
     "better-queue": "^3.8.6",
     "better-queue-sqlite": "^1.0.4",
@@ -38,5 +27,19 @@
     "request": "^2.87.0",
     "request-promise": "^4.2.2",
     "winston": "^2.4.2"
+  },
+  "devDependencies": {
+    "@types/argv": "0.0.4",
+    "@types/body-parser": "^1.17.0",
+    "@types/cors": "^2.8.4",
+    "@types/express": "^4.11.1",
+    "@types/lodash": "^4.14.109",
+    "@types/lodash.get": "^4.4.3",
+    "@types/mkdirp": "^0.5.2",
+    "@types/node": "^9.6.0",
+    "@types/request": "^2.47.0",
+    "@types/request-promise": "^4.1.41",
+    "@types/winston": "^2.3.9",
+    "cross-env": "^5.2.0"
   }
 }
