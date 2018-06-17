@@ -33,8 +33,6 @@ import {
 } from 'matrix-js-sdk';
 // side-effect upgrade MatrixClient prototype
 import './matrix_client_ext';
-// side-effect upgrade Map and Set prototypes
-import './builtin_ext';
 
 const Queue = require('better-queue');
 const SqliteStore = require('better-queue-sqlite');
