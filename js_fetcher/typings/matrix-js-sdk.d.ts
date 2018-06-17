@@ -76,10 +76,6 @@ export class MatrixClient {
 
     private _requestTokenFromEndpoint(endpoint: string, params: object): Promise<string>
 
-    // custom
-    fetchEvent(roomId: string, eventId: string): Promise<MatrixEvent>;
-    fetchEventContext(roomId: string, eventId: string, limit: number): Promise<EventWithContext>
-
     startClient(opts: StartClientOpts|number); // backwards compat with historyLen
 
     acceptGroupInvite(groupId: string, opts: object): Promise<object> | MatrixError;
