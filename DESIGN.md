@@ -1,7 +1,7 @@
 # Design
 
 Due to the requirements this system will have two modes:
-+ Appservice mode
++ ~~Appservice mode~~ AS mode at this time will not be continued
 + Local Daemon mode
 
 # Appservice mode
@@ -33,14 +33,18 @@ In this mode, the indexes can never hold events which we don't have access to so
 |            |  CS-API  |  |             |
 +------------+          |  +-------------+
    /\                   |    ^
-   || /search           |    |
-   \/                   |    | /sync and
-+-------------------+   |    | /messages
-|                   |   |    |  CS-API
-|   matrix-search   | =======/
-|                   |   |
+   || /search           |    ‖
+   \/                   |    ‖ /sync and
++-------------------+   |    ‖ /messages
+|                   |   |    ‖  CS-API
+|   matrix-search   |   |    ‖
+|                   |   |    ‖
++-------------------+   |    ‖
+                        |    ‖
++-------------------+   |    ‖
+|   _js_fetcher     | =======/
 +-------------------+   |
-                        |
+                        
                 `Local` | `Remote` 
 ```
 
