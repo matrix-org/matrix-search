@@ -22,7 +22,6 @@ RUN apk add --update python make
 
 COPY server /node/server
 WORKDIR /node/server
-RUN npm install https://matrix.org/packages/npm/olm/olm-2.2.2.tgz
 RUN npm i
 
 # -- Scripts ------------------------------------v
