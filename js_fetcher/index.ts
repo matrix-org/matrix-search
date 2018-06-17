@@ -61,10 +61,6 @@ argv.option([
         name: 'password',
         type: 'string',
         description: 'The password to be used to connect to the Matrix HS',
-    }, {
-        name: 'port',
-        type: 'int',
-        description: 'Port to bind to (default 8000)',
     }
 ]);
 
