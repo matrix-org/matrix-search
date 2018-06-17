@@ -383,8 +383,6 @@ declare namespace Matrix.Models {
         state_key?: string;
         redacts?: string;
         type: string;
-
-        private _clearEvent: object;
     }
 
     interface MapStringString {
@@ -398,6 +396,9 @@ declare namespace Matrix.Models {
         // status: EventStatus;
         error: Error;
         forwardLooking: boolean;
+
+        private _clearEvent: object;
+
         constructor(event: Event);
 
         // custom

@@ -5,12 +5,12 @@ declare var global: {
 };
 
 import argv from 'argv';
-import cors from 'cors';
+// import cors from 'cors';
 import get from 'lodash.get';
 import * as winston from 'winston';
 import * as mkdirp from 'mkdirp';
-import bodyParser from 'body-parser';
-import express, {Request, Response} from 'express';
+// import bodyParser from 'body-parser';
+// import express, {Request, Response} from 'express';
 import {RequestPromise, RequestPromiseOptions} from 'request-promise';
 
 import {RequestAPI, RequiredUriUrl} from "request";
@@ -97,6 +97,7 @@ class BleveHttp {
         });
     }
 
+    /*
     search(req: BleveRequest) {
         return this.request({
             url: 'query',
@@ -104,10 +105,10 @@ class BleveHttp {
             json: true,
             body: req,
         });
-    }
+    }*/
 }
 
-const b = new BleveHttp("http://localhost:9999/api/");
+const b = new BleveHttp("http://localhost:8000/api/");
 
 function indexable(ev: Event): boolean {
     return indexableKeys.some((key: string) => get(ev, key) !== undefined);
@@ -152,7 +153,7 @@ if (disableConsoleLogger) {
     console.error = function(){};
 }
 
-interface GroupValueJSON {
+/*interface GroupValueJSON {
     order: number;
     next_batch?: string;
     results: Array<string>;
@@ -258,9 +259,9 @@ interface Result {
     rank: number;
     result: Event;
     context?: EventContext;
-}
+}*/
 
-class Search {
+/*class Search {
     cli: MatrixClient;
 
     constructor(cli: MatrixClient) {
@@ -317,7 +318,7 @@ class Search {
         }));
 
         return results;
-    }
+    }*/
 
     /**
      * @param keys {string} pass straight through to go-bleve
@@ -326,7 +327,7 @@ class Search {
      * @param searchTerm {string} pass straight through to go-bleve
      * @param from {number} pass straight through to go-bleve
      * @param context? {RequestEventContext} if defined use to fetch context after go-bleve call
-     */
+     *//*
     async query(keys: Array<string>, searchFilter: SearchFilter, sortBy: SearchOrder, searchTerm: string, from: number, context?: RequestEventContext): Promise<[Array<EventLookupResult>, number]> {
         const filter: Query = {};
 
@@ -369,7 +370,12 @@ class Search {
 enum SearchOrder {
     Rank = 'rank',
     Recent = 'recent',
-}
+}*/
+
+const FILTER_BLOCK = {
+    not_types: ['*'],
+    limit: 0,
+};
 
 async function setup() {
     const args = argv.run();
@@ -465,30 +471,15 @@ async function setup() {
     filter.setDefinition({
         room: {
             include_leave: false, // TODO: not sure here
-            ephemeral: { // we don't care about ephemeral events
-                limit: 0,
-                types: [],
-            },
-            account_data: { // we don't care about room account_data
-                limit: 0,
-                types: [],
-            },
-            // state: { // TODO: do we care about state
-            //     limit: 0,
-            //     types: [],
-            // },
+            ephemeral: FILTER_BLOCK, // we don't care about ephemeral events
+            account_data: FILTER_BLOCK, // we don't care about room account_data
+            // state: FILTER_BLOCK, // TODO: do we care about state
             // timeline: { // TODO do we want all timeline evs
             //
             // }
         },
-        presence: { // we don't care about presence
-            limit: 0,
-            types: [],
-        },
-        account_data: { // we don't care about global account_data
-            limit: 0,
-            types: [],
-        },
+        presence: FILTER_BLOCK, // we don't care about presence
+        account_data: FILTER_BLOCK, // we don't care about global account_data
     });
 
     try {
@@ -508,6 +499,7 @@ async function setup() {
     });
     logger.info('client started');
 
+    /*
     const app = express();
     app.use(bodyParser.json());
     app.use(cors({
@@ -733,10 +725,9 @@ async function setup() {
     const port = args.options['port'] || 8000;
     app.listen(port, () => {
         logger.info('we are live', {port});
-    });
+    });*/
 }
 
-// TODO pagination
 // TODO groups-pagination
 // TODO backfill
 
@@ -744,6 +735,7 @@ function filterName(cli: MatrixClient): string {
     return `MATRIX_SEARCH_FILTER_${cli.credentials.userId}`;
 }
 
+/*
 function normalizeGroupValueOrder(it: IterableIterator<GroupValue>) {
     let i = 1;
     Array.from(it).sort((a: GroupValue, b: GroupValue) => a.order-b.order).forEach((g: GroupValue) => {
@@ -751,8 +743,9 @@ function normalizeGroupValueOrder(it: IterableIterator<GroupValue>) {
         g.order = i++;
     });
 }
+*/
 
-class SearchFilter {
+/*class SearchFilter {
     rooms: Set<string>;
     notRooms: Set<string>;
     senders: Set<string>;
@@ -773,15 +766,15 @@ class SearchFilter {
         this.limit = typeof o['limit'] === "number" ? o['limit'] : 10;
         this.containsURL = o['contains_url'];
     }
-}
+}*/
 
-interface RequestEventContext {
+/*interface RequestEventContext {
     before_limit?: number;
     after_limit?: number;
     include_profile: boolean;
-}
+}*/
 
-enum RequestGroupKey {
+/*enum RequestGroupKey {
     roomId = "room_id",
     sender = "sender",
 }
@@ -792,7 +785,7 @@ interface RequestGroup {
 
 interface RequestGroups {
     group_by?: Array<RequestGroup>;
-}
+}*/
 
 enum RequestKey {
     body = "content.body",
@@ -802,7 +795,7 @@ enum RequestKey {
 
 const indexableKeys = [RequestKey.body, RequestKey.name, RequestKey.topic];
 
-interface MatrixSearchRequestBody {
+/*interface MatrixSearchRequestBody {
     search_term: string;
     keys?: Array<RequestKey>;
     filter?: object; // this gets inflated to an instance of Filter
@@ -829,4 +822,4 @@ interface MatrixSearchResponse {
             next_batch?: string;
         }
     }
-}
+}*/

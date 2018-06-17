@@ -38,7 +38,7 @@ MatrixClient.prototype.fetchEventContext = async function(roomId: string, eventI
     } catch (e) {}
 
     if (!res || !res.event)
-        throw new Error("'event' not in '/event' result - homeserver too old?");
+        throw new Error("'event' not in '/context' result - homeserver too old?");
 
     // const mapper = this.getEventMapper();
 
