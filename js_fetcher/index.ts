@@ -238,12 +238,12 @@ async function setup() {
     filter.setDefinition({
         room: {
             include_leave: false, // TODO: not sure here
-            ephemeral: FILTER_BLOCK, // we don't care about ephemeral events
+            // ephemeral: FILTER_BLOCK, // we don't care about ephemeral events
             account_data: FILTER_BLOCK, // we don't care about room account_data
             // state: FILTER_BLOCK, // TODO: do we care about state
-            // timeline: { // TODO do we want all timeline evs
-            //
-            // }
+            timeline: { // TODO do we want all timeline evs
+                limit: 20, // grab more events for each room to begin with
+            },
         },
         presence: FILTER_BLOCK, // we don't care about presence
         account_data: FILTER_BLOCK, // we don't care about global account_data
