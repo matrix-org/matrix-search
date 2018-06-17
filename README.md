@@ -30,5 +30,5 @@ Then you can build and run the docker image like so:
 
 ```
 $ docker build -t matrix-search .
-$ docker run -v bleve:/node/server/bleve -v store:/node/server/store -p 8000:8000 --env-file credentials matrix-search
+$ docker run -v bleve:/node/js_fetcher/bleve -v store:/node/js_fetcher/store -p 8000:8000 --env-file credentials matrix-search
 ```
