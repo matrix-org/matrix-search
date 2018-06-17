@@ -130,11 +130,28 @@ func makeIndexID(roomID, eventID string) string {
 	return fmt.Sprintf("%s/%s", roomID, eventID)
 }
 
+var DesiredContentFields = [...]string{"body", "name", "topic", "url"}
+
+func shouldIndexEvent(ev *gomatrix.Event) bool {
+	// this event is a redaction
+	if ev.Redacts != "" {
+		return true
+	}
+
+	for _, key := range DesiredContentFields {
+		if _, has := ev.Content[key].(string); has {
+			return true
+		}
+	}
+	return false
+}
+
 func indexBatch(index bleve.Index, evs []*gomatrix.Event) {
 	log.WithField("batch_size", len(evs)).Info("received batch of events to index")
 
 	for _, ev := range evs {
-		if ev.Type != "m.room.message" {
+		if !shouldIndexEvent(ev) {
+			log.WithField("event", ev).Debug("discarding event")
 			continue
 		}
 
@@ -279,7 +296,7 @@ func main() {
 
 	clientapi.RegisterLocalHandler(router, index)
 
-	bind := ":9999"
+	bind := ":8000"
 
 	log.WithField("bind", bind).Info("starting matrix-search indexing daemon")
 

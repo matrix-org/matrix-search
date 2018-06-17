@@ -337,23 +337,24 @@ func h(cli *WrappedClient, index bleve.Index, sr *SearchRequest, b *batch) (resp
 
 		eventMap, count, allowedEvents, err = searchMessages(cli, index, keys, searchFilter, "recent", searchTerm, from, eventContext)
 
-		if len(allowedEvents) >= searchFilter.Limit {
-			// TODO fix this as HitNumber does not work for this purpose :(
-			offset := allowedEvents[len(allowedEvents)-1].HitNumber
-			offsetStr := strconv.Itoa(int(offset))
+		// the number of the events the caller still has not seen after this batch
+		numUnseen := count - from - len(allowedEvents)
+		// if there are events they haven't seen we need to give them a token
+		if numUnseen > 0 {
+			offset := strconv.Itoa(int(from + len(allowedEvents)))
 
 			if b.isValid() {
-				if t, err := newBatch(*b.Group, *b.GroupKey, offsetStr); err == nil {
+				if t, err := newBatch(*b.Group, *b.GroupKey, offset); err == nil {
 					globalNextBatch = &t
 				}
 			} else {
-				if t, err := newBatch("all", "", offsetStr); err == nil {
+				if t, err := newBatch("all", "", offset); err == nil {
 					globalNextBatch = &t
 				}
 			}
 
 			for roomID, group := range roomGroups {
-				if t, err := newBatch("room_id", roomID, offsetStr); err == nil {
+				if t, err := newBatch("room_id", roomID, offset); err == nil {
 					group.NextBatch = &t
 				}
 			}
