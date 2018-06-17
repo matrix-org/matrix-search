@@ -40,7 +40,7 @@ In this mode, the indexes can never hold events which we don't have access to so
 |   matrix-search   |   |    ‖
 |                   |   |    ‖
 +-------------------+   |    ‖
-                        |    ‖
+   /\(events)           |    ‖
 +-------------------+   |    ‖
 |   _js_fetcher     | =======/
 +-------------------+   |
