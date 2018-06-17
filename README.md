@@ -14,8 +14,8 @@ To get started:
 2. Clone this repository, and enter it
 3. build the Go portion by running `gb build`
 4. execute the created executable in the background or in another terminal; e.g `./bin/matrix-search-local &`
-5. navigate to the go portion using `cd server`
-6. install dependencies using `npm i` or `yarn i`
+5. navigate to the go portion using `cd js_fetcher`
+6. install dependencies using `npm i` or `yarn`
 7. run Node script using `node index.js --url=$HSURL --username=$USERNAME --password=$PASSWORD` replacing the three variables appropriately.
 
 You will need to run a modified Matrix client which sends `/search` requests to `localhost:8000` or whatever port you specify to Node using `--port=$PORT`

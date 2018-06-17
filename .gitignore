@@ -26,7 +26,6 @@ _cgo_export.*
 
 _testmain.go
 
-*.exe
 *.test
 *.prof
 
@@ -35,7 +34,5 @@ config.yaml
 passwords.txt
 persist.json
 node_modules/
-server/queue
-server/store.sqlite
-server/store/
+js_fetcher/store/
 vendor/pkg/
