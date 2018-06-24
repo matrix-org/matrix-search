@@ -346,7 +346,13 @@ func main() {
 		c.JSON(http.StatusOK, res)
 	})
 
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_fk=true", path.Join(opts.DataPath, "db.sqlite")))
+	dbPath := fmt.Sprintf("file:%s?_fk=true", path.Join(opts.DataPath, "db.sqlite"))
+	log.WithField("db_path", dbPath)
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		panic(err)
+	}
 
 	sess, err := sqlite.New(db)
 	if err != nil {
