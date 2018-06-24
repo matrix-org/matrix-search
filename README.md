@@ -39,5 +39,5 @@ Then you can build and run the docker image like so:
 
 ```
 $ docker build -t matrix-search .
-$ docker run -v data:/node/js_fetcher/data --read-only -v config.json:/node/js_fetcher/config.json -t -i -p 8000:8000 matrix-search
+$ docker run -v data:/node/js_fetcher/data -t -i -p 8000:8000 matrix-search
 ```

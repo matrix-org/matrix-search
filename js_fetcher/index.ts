@@ -60,7 +60,7 @@ const args = argv.run();
 
 // Loading localStorage module
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
-    global.localStorage = new (require('node-localstorage').LocalStorage)(path.join(args.options['data'], 'localStorage'));
+    global.localStorage = new (require('node-localstorage').LocalStorage)(path.join(args.options['data'], 'js_fetcher.localStorage'));
 
 setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 

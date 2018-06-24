@@ -24,5 +24,7 @@ COPY js_fetcher /node/js_fetcher
 WORKDIR /node/js_fetcher
 RUN npm i
 
+COPY config.json /node/js_fetcher/config.json
+
 # -- Scripts ------------------------------------v
-CMD /go/src/matrix-search/bin/matrix-search-local & node index.js --url=$HSURL --username=$USERNAME --password=$PASSWORD
+CMD /go/src/matrix-search/bin/matrix-search-local --config=config.json --data=data & node index.js --config=config.json --data=data
