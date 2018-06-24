@@ -201,7 +201,7 @@ func redactBatch(index bleve.Index, evs []*gomatrix.Event) {
 type Options struct {
 	ConfigPath  string `short:"c" long:"config" default:"config.json" description:"Path to the JSON config file"`
 	DataPath    string `short:"d" long:"data" default:"data" description:"Path to data folder (MUST EXIST)"`
-	EnablePprof bool   `long:"enable-pprof" default:"false" description:"Whether to attach pprof handlers"`
+	EnablePprof bool   `long:"enable-pprof" description:"Whether to attach pprof handlers"`
 	BindAddr    string `short:"b" long:"bind" default:":8000" description:"The address:port to bind the web server to"`
 }
 
