@@ -1,3 +1,5 @@
+import * as path from "path";
+
 declare var global: {
     Olm: any
     localStorage?: any
@@ -7,7 +9,6 @@ declare var global: {
 import argv from 'argv';
 import get from 'lodash.get';
 import * as winston from 'winston';
-import * as mkdirp from 'mkdirp';
 import {RequestPromise, RequestPromiseOptions} from 'request-promise';
 import {RequestAPI, RequiredUriUrl} from 'request';
 
@@ -40,25 +41,29 @@ const request = require('request-promise');
 
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 
-// create directory which will house the stores.
-mkdirp.sync('./store');
-// Loading localStorage module
-if (typeof global.localStorage === "undefined" || global.localStorage === null)
-    global.localStorage = new (require('node-localstorage').LocalStorage)('./store/localStorage');
-
-setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
-
 argv.option([
     {
         name: 'config',
         type: 'path',
-        description: 'Path to the JSON config file'
+        description: 'Path to the JSON config file',
+    }, {
+        name: 'data',
+        type: 'path',
+        description: 'Path to the data directory',
     }, {
         name: 'matrix-search-url',
         type: 'string',
         description: 'The address:port of the matrix-search Go server',
     },
 ]);
+const args = argv.run();
+
+// Loading localStorage module
+if (typeof global.localStorage === "undefined" || global.localStorage === null)
+    global.localStorage = new (require('node-localstorage').LocalStorage)(path.join(args.options['data'], 'localStorage'));
+
+setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
+
 
 const logger = new winston.Logger({
     level: 'info',
@@ -118,8 +123,6 @@ function onBatchFailed(error) {
 }
 
 async function setup() {
-    const args = argv.run();
-
     let config;
     try {
         config = require(args.options['config'] || 'config.json');
@@ -141,7 +144,7 @@ async function setup() {
         maxRetries: 100,
         retryDelay: 5000,
         store: new SqliteStore({
-            path: './store/queue.sqlite',
+            path: path.join(args.options['data'], 'js_fetcher.queue.sqlite'),
         }),
     });
 

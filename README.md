@@ -24,7 +24,7 @@ To get started:
 1. navigate to the go portion using `pushd js_fetcher`
 1. install dependencies using `npm i` or `yarn`
 1. navigate back using `popd`
-1. run Node script in the background or in another terminal; e.g `node js_fetcher/index.js --config=config.json &`
+1. run Node script in the background or in another terminal; e.g `node js_fetcher/index.js --config=config.json --data=data &`
 
 You will need to run a modified Matrix client which sends `/search` requests to `localhost:8000` 
 riot-web supports these modifications using the `matrix-search` branches on `matrix-js-sdk` and `matrix-react-sdk` and specifying the Search URL using `custom_search_url` in config.json
