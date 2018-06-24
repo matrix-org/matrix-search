@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
@@ -346,22 +345,22 @@ func main() {
 		c.JSON(http.StatusOK, res)
 	})
 
-	dbPath := fmt.Sprintf("file:%s?_fk=true", path.Join(opts.DataPath, "db.sqlite"))
+	dbPath := path.Join(opts.DataPath, "db.sqlite")
 	log.WithField("db_path", dbPath).Info("opening sqlite database")
 
-	db, err := sql.Open("sqlite3", dbPath)
+	sess, err := sqlite.Open(sqlite.ConnectionURL{
+		Database: dbPath,
+		Options: map[string]string{
+			"_fk": "true",
+		},
+	})
+
 	if err != nil {
 		log.WithError(err).Fatal("failed to open database")
 		return
 	}
 
-	sess, err := sqlite.New(db)
-	if err != nil {
-		log.WithError(err).Fatal("failed to make sess")
-		return
-	}
-
-	//driver, err := postgres.WithInstance(db, &postgres.Config{})
+	//driver, err := postgres.WithInstance(sess.Driver().(*sql.DB), &postgres.Config{})
 	//m, err := migrate.NewWithDatabaseInstance("file:///migrations", "sqlite3", driver)
 	//m.Up()
 
