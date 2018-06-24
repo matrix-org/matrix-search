@@ -27,7 +27,7 @@ func main() {
 		"username": opts.Username,
 		"password": opts.Password,
 		"output":   opts.ConfigPath,
-	})
+	}).Info("starting")
 
 	// Log in here
 	cli, err := common.MakeClient(opts.HSURL, "", "")
