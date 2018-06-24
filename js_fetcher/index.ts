@@ -50,18 +50,14 @@ setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 
 argv.option([
     {
-        name: 'url',
-        type: 'string',
-        description: 'The URL to be used to connect to the Matrix HS',
+        name: 'config',
+        type: 'path',
+        description: 'Path to the JSON config file'
     }, {
-        name: 'username',
+        name: 'matrix-search-url',
         type: 'string',
-        description: 'The username to be used to connect to the Matrix HS',
-    }, {
-        name: 'password',
-        type: 'string',
-        description: 'The password to be used to connect to the Matrix HS',
-    }
+        description: 'The address:port of the matrix-search Go server',
+    },
 ]);
 
 const logger = new winston.Logger({
@@ -88,39 +84,9 @@ class BleveHttp {
     }
 }
 
-const b = new BleveHttp("http://localhost:8000/api/");
-
 function indexable(ev: Event): boolean {
     return indexableKeys.some((key: string) => get(ev, key) !== undefined);
 }
-
-const q = new Queue(async (batch: Array<Event>, cb) => {
-    try {
-        cb(null, await b.enqueue(batch));
-    } catch (e) {
-        cb(e);
-    }
-}, {
-    batchSize: 100,
-    maxRetries: 100,
-    retryDelay: 5000,
-    store: new SqliteStore({
-        path: './store/queue.sqlite',
-    }),
-});
-
-q.on('task_queued', function(task_id: string, ev: Event) {
-    const {room_id, event_id, sender, type} = ev;
-    if (ev.redacts) {
-        logger.info('enqueue event for redaction', {room_id, event_id, task_id});
-    } else {
-        logger.info('enqueue event for indexing', {room_id, event_id, sender, type, task_id});
-    }
-});
-
-q.on('batch_failed', function(error) {
-    logger.error('batch failed', {error});
-});
 
 setup().then();
 
@@ -138,53 +104,56 @@ const FILTER_BLOCK = {
     limit: 0,
 };
 
+function onTaskQueued(task_id: string, ev: Event) {
+    const {room_id, event_id, sender, type} = ev;
+    if (ev.redacts) {
+        logger.info('enqueue event for redaction', {room_id, event_id, task_id});
+    } else {
+        logger.info('enqueue event for indexing', {room_id, event_id, sender, type, task_id});
+    }
+}
+
+function onBatchFailed(error) {
+    logger.error('batch failed', {error});
+}
+
 async function setup() {
     const args = argv.run();
 
-    const baseUrl = args.options['url'] || 'https://matrix.org';
-
-    let creds = {
-        userId: global.localStorage.getItem('userId'),
-        deviceId: global.localStorage.getItem('deviceId'),
-        accessToken: global.localStorage.getItem('accessToken'),
-    };
-
-    if (!creds.userId || !creds.deviceId || !creds.accessToken) {
-        if (!args.options['username'] || !args.options['password']) {
-            logger.error('username and password were not specified on the commandline and none were saved');
-            argv.help();
-            process.exit(-1);
-        }
-
-        const loginClient: MatrixClient = createClient({baseUrl});
-
-        try {
-            const res = await loginClient.login('m.login.password', {
-                user: args.options['username'],
-                password: args.options['password'],
-                initial_device_display_name: 'Matrix Search Daemon',
-            });
-
-            logger.info('logged in', {user_id: res.user_id});
-            global.localStorage.setItem('userId', res.user_id);
-            global.localStorage.setItem('deviceId', res.device_id);
-            global.localStorage.setItem('accessToken', res.access_token);
-
-            creds = {
-                userId: res.user_id,
-                deviceId: res.device_id,
-                accessToken: res.access_token,
-            };
-        } catch (error) {
-            logger.error('an error occurred logging in', {error});
-            process.exit(1);
-        }
+    let config;
+    try {
+        config = require(args.options['config'] || 'config.json');
+    } catch (e) {
+        logger.error('failed to load config', e);
+        return;
     }
 
+    const b = new BleveHttp(args.options['matrix-search-url'] || "http://localhost:8000/api/");
+
+    const q = new Queue(async (batch: Array<Event>, cb) => {
+        try {
+            cb(null, await b.enqueue(batch));
+        } catch (e) {
+            cb(e);
+        }
+    }, {
+        batchSize: 100,
+        maxRetries: 100,
+        retryDelay: 5000,
+        store: new SqliteStore({
+            path: './store/queue.sqlite',
+        }),
+    });
+
+    q.on('task_queued', onTaskQueued);
+    q.on('batch_failed', onBatchFailed);
+
     const cli: MatrixClient = createClient({
-        baseUrl,
+        baseUrl: config['hs_url'],
         idBaseUrl: '',
-        ...creds,
+        userId: config['user_id'],
+        deviceId: config['device_id'],
+        accessToken: config['access_token'],
         useAuthorizationHeader: true,
         store: new MatrixInMemoryStore({
             localStorage: global.localStorage,

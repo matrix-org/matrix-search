@@ -7,7 +7,7 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
@@ -664,67 +664,25 @@ func handler(body io.ReadCloser, index bleve.Index, hsURL, token string, b *batc
 	return results, err
 }
 
-func getToken(r *http.Request) string {
-	header := r.Header.Get("Authorization")
-	if strings.HasPrefix(header, "Bearer ") {
-		return strings.TrimPrefix(header, "Bearer ")
-	}
-
-	if keys, ok := r.URL.Query()["key"]; ok && len(keys) == 1 {
-		return keys[0]
-	}
-
-	return ""
-}
-
-func getBatch(r *http.Request) (b *batch, err error) {
-	if batchStr, ok := r.URL.Query()["next_batch"]; ok && len(batchStr) == 1 {
+func getBatch(c *gin.Context) (b *batch, err error) {
+	if batchStr := c.QueryArray("next_batch"); len(batchStr) == 1 {
 		b, err = readBatch(batchStr[0])
 		return
 	}
 	return
 }
 
-func createClient(hsURL, token string) (wp *WrappedClient, err error) {
-	if token == "" {
-		err = errors.New("no token")
-		return
-	}
-
-	// userID gets set later using whoami call
-	wp, err = NewWrappedClient(hsURL, "", token)
-	if err != nil {
-		return
-	}
-
-	var resp *RespWhoami
-	resp, err = wp.Whoami()
-	if err != nil {
-		return
-	}
-
-	wp.UserID = resp.UserID
-	return
-}
-
-func RegisterLocalHandler(router *mux.Router, index bleve.Index) {
-	router.HandleFunc("/clientapi/search", func(w http.ResponseWriter, r *http.Request) {
-		// TODO replace hsURL here
-		cli, err := createClient("https://matrix.org", getToken(r))
+func RegisterLocalHandler(r *gin.RouterGroup, cli *WrappedClient, index bleve.Index) {
+	r.POST("/clientapi/search", func(c *gin.Context) {
+		b, err := getBatch(c)
 		if err != nil {
-			http.Error(w, "no token", http.StatusUnauthorized)
-			return
-		}
-
-		b, err := getBatch(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
 		var sr SearchRequest
-		if err := json.NewDecoder(r.Body).Decode(&sr); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&sr); err != nil {
+			c.AbortWithError(http.StatusBadRequest, errors.New("invalid request body"))
 			return
 		}
 
@@ -738,19 +696,12 @@ func RegisterLocalHandler(router *mux.Router, index bleve.Index) {
 				// return
 			}
 			fmt.Println(err)
-			http.Error(w, err.Error(), 400)
+			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
-		//hits, err := json.Marshal(events)
-		hits, err := json.Marshal(resp)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(hits)
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusOK, resp)
 	})
 }

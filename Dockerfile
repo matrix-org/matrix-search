@@ -25,7 +25,4 @@ WORKDIR /node/js_fetcher
 RUN npm i
 
 # -- Scripts ------------------------------------v
-COPY ./run.sh run.sh
-RUN chmod +x ./run.sh
-
-CMD /go/src/matrix-search/bin/matrix-search-local & ./run.sh
+CMD /go/src/matrix-search/bin/matrix-search-local & node index.js --url=$HSURL --username=$USERNAME --password=$PASSWORD

@@ -1,20 +1,26 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"github.com/blevesearch/bleve"
 	"github.com/blevesearch/bleve/search"
 	"github.com/blevesearch/bleve/search/query"
-	"github.com/gorilla/mux"
+	"github.com/gin-contrib/pprof"
+	"github.com/gin-gonic/gin"
+	"github.com/jessevdk/go-flags"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/clientapi"
+	"github.com/matrix-org/matrix-search/clientapi/notifications"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
+	_ "github.com/mattn/go-sqlite3"
 	log "github.com/sirupsen/logrus"
 	"net/http"
+	"path"
 	"strings"
 	"time"
+	"upper.io/db.v3/sqlite"
 )
 
 type QueryRequest struct {
@@ -192,19 +198,64 @@ func redactBatch(index bleve.Index, evs []*gomatrix.Event) {
 	}
 }
 
+type Options struct {
+	ConfigPath  string `short:"c" long:"config" default:"config.json" description:"Path to the JSON config file"`
+	DataPath    string `short:"d" long:"data" default:"data" description:"Path to data folder (MUST EXIST)"`
+	EnablePprof bool   `long:"enable-pprof" default:"false" description:"Whether to attach pprof handlers"`
+	BindAddr    string `short:"b" long:"bind" default:":8000" description:"The address:port to bind the web server to"`
+}
+
 func main() {
-	// force colours on the logrus standard logger
-	log.StandardLogger().Formatter = &log.TextFormatter{ForceColors: true}
+	common.SetupLogger()
 
-	index := indexing.GetIndex("all")
+	var opts Options
+	if _, err := flags.Parse(&opts); err != nil {
+		return
+	}
 
-	router := mux.NewRouter()
-	router.StrictSlash(true)
+	config, err := common.ReadConfigFromFile(opts.ConfigPath)
+	if err != nil {
+		log.WithError(err).Fatal("failed to read config json")
+		return
+	}
 
-	router.HandleFunc("/api/enqueue", func(w http.ResponseWriter, r *http.Request) {
+	cli, err := clientapi.NewWrappedClient(config.HSURL, config.UserID, config.AccessToken)
+	if err != nil {
+		log.WithError(err).Fatal("failed to instantiate matrix client")
+		return
+	}
+
+	resp, err := cli.Whoami()
+	if err != nil {
+		log.WithError(err).Fatal("failed to perform matrix action")
+		return
+	}
+
+	if resp.UserID != config.UserID {
+		log.WithFields(log.Fields{
+			"config.user_id": config.UserID,
+			"whoami.user_id": resp.UserID,
+		}).Fatal("user_id mismatch")
+		return
+	}
+
+	index, err := indexing.Bleve(path.Join(opts.DataPath, "bleve"))
+	if err != nil {
+		log.WithError(err).Fatal("failed to connect to bleve index")
+		return
+	}
+
+	router := gin.Default()
+
+	if opts.EnablePprof {
+		pprof.Register(router)
+	}
+
+	router.POST("/api/enqueue", func(c *gin.Context) {
 		var req []gomatrix.Event
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			log.WithField("path", "/api/enqueue").WithError(err).Error("failed to decode request body")
+		if err := c.ShouldBindJSON(&req); err != nil {
+			log.WithField("path", c.Request.URL.Path).WithError(err).Error("failed to decode request body")
+			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
@@ -225,26 +276,28 @@ func main() {
 		if len(toRedact) > 0 {
 			redactBatch(index, toRedact)
 		}
-	}).Methods(http.MethodPost)
 
-	router.HandleFunc("/api/index", func(w http.ResponseWriter, r *http.Request) {
-		decoder := json.NewDecoder(r.Body)
+		c.Status(http.StatusOK)
+	})
+
+	router.PUT("/api/index", func(c *gin.Context) {
 		var evs []*gomatrix.Event
-
-		if err := decoder.Decode(&evs); err != nil {
-			log.WithField("path", "/api/index").WithError(err).Error("failed to decode request body")
+		if err := c.ShouldBindJSON(&evs); err != nil {
+			log.WithField("path", c.Request.URL.Path).WithError(err).Error("failed to decode request body")
+			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
 		indexBatch(index, evs)
 
-		w.WriteHeader(http.StatusOK)
-	}).Methods(http.MethodPut)
+		c.Status(http.StatusOK)
+	})
 
-	router.HandleFunc("/api/query", func(w http.ResponseWriter, r *http.Request) {
+	router.POST("/api/query", func(c *gin.Context) {
 		var req QueryRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			log.WithField("path", "/api/query").WithError(err).Error("failed to decode request body")
+		if err := c.ShouldBindJSON(&req); err != nil {
+			log.WithField("path", c.Request.URL.Path).WithError(err).Error("failed to decode request body")
+			c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
 
@@ -289,19 +342,31 @@ func main() {
 			res.Rows[i].Highlights = calculateHighlights(resp.Hits[i], req.Keys)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(res)
-	}).Methods(http.MethodPost)
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusOK, res)
+	})
 
-	clientapi.RegisterLocalHandler(router, index)
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_fk=true", path.Join(opts.DataPath, "db.sqlite")))
 
-	bind := ":8000"
+	sess, err := sqlite.New(db)
+	if err != nil {
+		panic(err)
+	}
 
-	log.WithField("bind", bind).Info("starting matrix-search indexing daemon")
+	//driver, err := postgres.WithInstance(db, &postgres.Config{})
+	//m, err := migrate.NewWithDatabaseInstance("file:///migrations", "sqlite3", driver)
+	//m.Up()
+
+	clientapiRouter := router.Group("/clientapi")
+	{
+		clientapi.RegisterLocalHandler(clientapiRouter, cli, index)
+		notifications.Register(clientapiRouter, sess)
+	}
+
+	log.WithField("bind", opts.BindAddr).Info("starting matrix-search indexing daemon")
 
 	// start the HTTP server
-	log.Fatal(http.ListenAndServe(bind, router))
+	common.Begin(router, opts.BindAddr)
 }
 
 // Node should just be a syncer for Encrypted stuff,

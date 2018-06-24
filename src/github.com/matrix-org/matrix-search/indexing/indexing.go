@@ -19,7 +19,6 @@ import (
 	"github.com/blevesearch/blevex/detectlang"
 	"github.com/matrix-org/gomatrix"
 	log "github.com/sirupsen/logrus"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -114,20 +113,9 @@ func NewIndexer() Indexer {
 	}
 }
 
-const bleveBasePath = "bleve"
-
-//var bleveIdx bleve.Index
-//var bleveIdxMap = make(map[string]bleve.Index)
-
 // Bleve connect or create the index persistence
-func Bleve(indexPath string) (bleve.Index, error) {
-	//if bleveIdx, exists := bleveIdxMap[indexPath]; exists {
-	//	return bleveIdx, nil
-	//}
-
-	path := bleveBasePath + string(os.PathSeparator) + indexPath
-
-	// try to open de persistence file...
+func Bleve(path string) (bleve.Index, error) {
+	// try to open the persistence file...
 	bleveIdx, err := bleve.Open(path)
 
 	// if doesn't exists or something goes wrong...
