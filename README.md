@@ -26,7 +26,7 @@ To get started:
 1. navigate back using `popd`
 1. run Node script in the background or in another terminal; e.g `node js_fetcher/index.js --config=config.json &`
 
-You will need to run a modified Matrix client which sends `/search` requests to `localhost:8000` or whatever port you specify to Node using `--port=$PORT`
+You will need to run a modified Matrix client which sends `/search` requests to `localhost:8000` 
 riot-web supports these modifications using the `matrix-search` branches on `matrix-js-sdk` and `matrix-react-sdk` and specifying the Search URL using `custom_search_url` in config.json
 
 ## To run in a docker container

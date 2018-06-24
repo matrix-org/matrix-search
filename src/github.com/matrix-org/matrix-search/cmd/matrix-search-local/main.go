@@ -347,16 +347,18 @@ func main() {
 	})
 
 	dbPath := fmt.Sprintf("file:%s?_fk=true", path.Join(opts.DataPath, "db.sqlite"))
-	log.WithField("db_path", dbPath)
+	log.WithField("db_path", dbPath).Info("opening sqlite database")
 
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatal("failed to open database")
+		return
 	}
 
 	sess, err := sqlite.New(db)
 	if err != nil {
-		panic(err)
+		log.WithError(err).Fatal("failed to make sess")
+		return
 	}
 
 	//driver, err := postgres.WithInstance(db, &postgres.Config{})
