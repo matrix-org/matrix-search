@@ -1,8 +1,9 @@
-package clientapi
+package search
 
 import (
 	"github.com/gin-gonic/gin/json"
 	"github.com/matrix-org/gomatrix"
+	"github.com/matrix-org/matrix-search/common"
 	"sort"
 )
 
@@ -84,13 +85,10 @@ type EventContext struct {
 	EventsAfter  []*gomatrix.Event       `json:"events_after,omitempty"`
 }
 
-type ResultSet struct {
-}
-
 type Result struct {
-	Rank    float64       `json:"rank"`
-	Result  *WrappedEvent `json:"result"`
-	Context *EventContext `json:"context,omitempty"`
+	Rank    float64              `json:"rank"`
+	Result  *common.WrappedEvent `json:"result"`
+	Context *EventContext        `json:"context,omitempty"`
 }
 
 type RoomEventResults struct {

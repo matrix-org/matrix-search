@@ -1,8 +1,7 @@
-package clientapi
+package common
 
 import (
 	"github.com/matrix-org/gomatrix"
-	"github.com/matrix-org/matrix-search/common"
 	"strconv"
 	"sync"
 )
@@ -29,7 +28,7 @@ type RespJoinedRooms struct {
 	JoinedRooms []string `json:"joined_rooms"`
 }
 
-func (cli *WrappedClient) joinedRooms() (resp *RespJoinedRooms, err error) {
+func (cli *WrappedClient) JoinedRooms() (resp *RespJoinedRooms, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
@@ -38,7 +37,7 @@ func (cli *WrappedClient) joinedRooms() (resp *RespJoinedRooms, err error) {
 	return
 }
 
-func (cli *WrappedClient) latestState(roomID string) (resp []*gomatrix.Event, err error) {
+func (cli *WrappedClient) LatestState(roomID string) (resp []*gomatrix.Event, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
@@ -82,7 +81,7 @@ func max(a, b int) int {
 	return b
 }
 
-func (cli *WrappedClient) resolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
+func (cli *WrappedClient) ResolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
@@ -107,7 +106,7 @@ func (ev *WrappedEvent) IsStateEvent() bool {
 	return ev.StateKey != nil
 }
 
-func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *WrappedEvent, err error) {
+func (cli *WrappedClient) ResolveEvent(roomID, eventID string) (resp *WrappedEvent, err error) {
 	cli.Lock()
 	defer cli.Unlock()
 
@@ -116,15 +115,15 @@ func (cli *WrappedClient) resolveEvent(roomID, eventID string) (resp *WrappedEve
 	return
 }
 
-type eventTuple struct {
-	roomID  string
-	eventID string
+type EventTuple struct {
+	RoomID  string
+	EventID string
 }
 
-func (cli *WrappedClient) massResolveEventContext(wants []eventTuple, beforeLimit, afterLimit int) (resp []*RespContext, err error) {
+func (cli *WrappedClient) MassResolveEventContext(wants []EventTuple, beforeLimit, afterLimit int) (resp []*RespContext, err error) {
 	resp = make([]*RespContext, 0, len(wants))
 	for _, want := range wants {
-		ctx, err := cli.resolveEventContext(want.roomID, want.eventID, beforeLimit, afterLimit)
+		ctx, err := cli.ResolveEventContext(want.RoomID, want.EventID, beforeLimit, afterLimit)
 		if err != nil {
 			// TODO ignore history-perms
 			return nil, err
@@ -134,10 +133,10 @@ func (cli *WrappedClient) massResolveEventContext(wants []eventTuple, beforeLimi
 	return
 }
 
-func (cli *WrappedClient) massResolveEvent(wants []eventTuple) (resp []*WrappedEvent, err error) {
+func (cli *WrappedClient) MassResolveEvent(wants []EventTuple) (resp []*WrappedEvent, err error) {
 	resp = make([]*WrappedEvent, 0, len(wants))
 	for _, want := range wants {
-		ev, err := cli.resolveEvent(want.roomID, want.eventID)
+		ev, err := cli.ResolveEvent(want.RoomID, want.EventID)
 		if err != nil {
 			// TODO ignore history-perms
 			return nil, err
@@ -148,7 +147,7 @@ func (cli *WrappedClient) massResolveEvent(wants []eventTuple) (resp []*WrappedE
 }
 
 func NewWrappedASClient(userID, hsURL, ASUserID, token string) (wp *WrappedClient, err error) {
-	cli, err := common.MakeClient(hsURL, ASUserID, token)
+	cli, err := MakeClient(hsURL, ASUserID, token)
 	if err != nil {
 		return
 	}
@@ -157,61 +156,9 @@ func NewWrappedASClient(userID, hsURL, ASUserID, token string) (wp *WrappedClien
 }
 
 func NewWrappedClient(hsURL, userID, token string) (wp *WrappedClient, err error) {
-	cli, err := common.MakeClient(hsURL, userID, token)
+	cli, err := MakeClient(hsURL, userID, token)
 	if err != nil {
 		return
 	}
 	return &WrappedClient{Client: cli}, nil
-}
-
-type SearchResultProcessor interface {
-	build(id string, includeProfile bool) *Result
-	getEv() *WrappedEvent
-}
-
-func (reg *RespEvGeneric) build(includeProfile bool) (r Result) {
-	r.Result = reg.Event
-
-	ctx := reg.Context
-	if ctx == nil {
-		return
-	}
-
-	r.Context = &EventContext{
-		Start:        ctx.Start,
-		End:          ctx.End,
-		EventsBefore: ctx.EventsBefore,
-		EventsAfter:  ctx.EventsAfter,
-	}
-
-	if includeProfile {
-		senders := common.StringSet{}
-
-		for _, ev := range ctx.EventsBefore {
-			senders.AddString(ev.Sender)
-		}
-		for _, ev := range ctx.EventsAfter {
-			senders.AddString(ev.Sender)
-		}
-		senders.AddString(reg.Event.Sender)
-
-		r.Context.ProfileInfo = make(map[string]*UserProfile)
-		for _, ev := range ctx.State {
-			// if stateEvent with type "m.room.member" and sender thereof is in this context
-			if ev.IsStateEvent() && ev.Type == "m.room.member" && senders.Has(*ev.StateKey) {
-				userProfile := UserProfile{}
-
-				if str, ok := ev.Content["displayname"].(string); ok {
-					userProfile.DisplayName = str
-				}
-				if str, ok := ev.Content["avatar_url"].(string); ok {
-					userProfile.AvatarURL = str
-				}
-
-				r.Context.ProfileInfo[*ev.StateKey] = &userProfile
-			}
-		}
-	}
-
-	return
 }

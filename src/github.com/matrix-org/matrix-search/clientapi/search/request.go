@@ -1,4 +1,4 @@
-package clientapi
+package search
 
 import (
 	"encoding/base64"
@@ -167,7 +167,7 @@ func (fp *FilterPart) checkFields(roomID, sender, evType string, isURL bool) boo
 	return true
 }
 
-func (fp *FilterPart) filterEv(ev *WrappedEvent) bool {
+func (fp *FilterPart) filterEv(ev *common.WrappedEvent) bool {
 	sender := ev.Sender
 	roomID := ev.RoomID
 	evType := ev.Type

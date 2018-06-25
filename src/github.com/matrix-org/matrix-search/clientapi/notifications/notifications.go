@@ -51,6 +51,7 @@ func InsertEvent(sess sqlbuilder.Database, ctx context.Context, ev *gomatrix.Eve
 
 const tokenKey = "token"
 
+// this package is still WIP
 func handler(sess sqlbuilder.Database, req *RequestNotifications) (resp *ResponseNotifications, err error) {
 	return nil, nil
 }

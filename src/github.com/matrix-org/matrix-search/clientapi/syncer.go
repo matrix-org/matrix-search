@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/matrix-org/gomatrix"
+	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
 	"os"
@@ -160,7 +161,7 @@ func RegisterSyncer(idxr indexing.Indexer, conf *config.Config) {
 		panic("invalid local_daemon settings")
 	}
 
-	cli, err := NewWrappedClient(conf.Homeserver.URL, conf.LocalDaemon.UserID, conf.LocalDaemon.AccessToken)
+	cli, err := common.NewWrappedClient(conf.Homeserver.URL, conf.LocalDaemon.UserID, conf.LocalDaemon.AccessToken)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(-1)
