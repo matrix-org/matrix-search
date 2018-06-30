@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
+	"github.com/matrix-org/matrix-search/wrappedclient"
 )
 
 type requestGroup struct {
@@ -167,7 +168,7 @@ func (fp *FilterPart) checkFields(roomID, sender, evType string, isURL bool) boo
 	return true
 }
 
-func (fp *FilterPart) filterEv(ev *common.WrappedEvent) bool {
+func (fp *FilterPart) filterEv(ev *wrappedclient.WrappedEvent) bool {
 	sender := ev.Sender
 	roomID := ev.RoomID
 	evType := ev.Type

@@ -1,4 +1,4 @@
-package clientapi
+package wrappedclient
 
 import (
 	"encoding/json"

@@ -1,7 +1,9 @@
-package common
+package wrappedclient
 
 import (
+	"crypto/tls"
 	"github.com/matrix-org/gomatrix"
+	"net/http"
 	"strconv"
 	"sync"
 )
@@ -143,6 +145,17 @@ func (cli *WrappedClient) MassResolveEvent(wants []EventTuple) (resp []*WrappedE
 		}
 		resp = append(resp, ev)
 	}
+	return
+}
+
+func MakeClient(hsURL, localpart, token string) (cli *gomatrix.Client, err error) {
+	cli, err = gomatrix.NewClient(hsURL, localpart, token)
+	if err != nil {
+		return
+	}
+	cli.Client = &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}}
 	return
 }
 

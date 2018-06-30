@@ -1,13 +1,10 @@
-package clientapi
+package wrappedclient
 
 import (
 	"encoding/json"
 	"fmt"
 	"github.com/matrix-org/gomatrix"
-	"github.com/matrix-org/matrix-search/common"
-	"github.com/matrix-org/matrix-search/config"
 	"github.com/matrix-org/matrix-search/indexing"
-	"os"
 	"runtime/debug"
 	"time"
 )
@@ -156,19 +153,9 @@ func (s *Syncer) GetFilterJSON(userID string) json.RawMessage {
 	return json.RawMessage(`{"room":{"timeline":{"limit":50}}}`)
 }
 
-func RegisterSyncer(idxr indexing.Indexer, conf *config.Config) {
-	if conf.LocalDaemon.UserID == "" || conf.LocalDaemon.AccessToken == "" {
-		panic("invalid local_daemon settings")
-	}
-
-	cli, err := common.NewWrappedClient(conf.Homeserver.URL, conf.LocalDaemon.UserID, conf.LocalDaemon.AccessToken)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
-	}
-
+func RegisterSyncer(idxr indexing.Indexer, cli *WrappedClient) {
 	store := NewPersistedStore()
-	syncer := gomatrix.NewDefaultSyncer(conf.LocalDaemon.UserID, store)
+	syncer := gomatrix.NewDefaultSyncer(cli.UserID, store)
 
 	cli.Syncer = syncer
 	cli.Store = store

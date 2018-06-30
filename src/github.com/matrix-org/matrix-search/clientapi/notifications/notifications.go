@@ -49,8 +49,6 @@ func InsertEvent(sess sqlbuilder.Database, ctx context.Context, ev *gomatrix.Eve
 	})
 }
 
-const tokenKey = "token"
-
 // this package is still WIP
 func handler(sess sqlbuilder.Database, req *RequestNotifications) (resp *ResponseNotifications, err error) {
 	return nil, nil
@@ -58,7 +56,6 @@ func handler(sess sqlbuilder.Database, req *RequestNotifications) (resp *Respons
 
 func Register(r *gin.RouterGroup, sess sqlbuilder.Database) {
 	r.POST("/notifications", func(c *gin.Context) {
-		//token := c.MustGet(tokenKey).(string) // we don't need token we just need them to be Authed
 		var req RequestNotifications
 		c.BindQuery(&req)
 

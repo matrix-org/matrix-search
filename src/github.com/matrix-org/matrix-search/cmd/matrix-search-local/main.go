@@ -8,6 +8,7 @@ import (
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
 	"github.com/matrix-org/matrix-search/js-fetcher-api"
+	"github.com/matrix-org/matrix-search/wrappedclient"
 	_ "github.com/mattn/go-sqlite3"
 	log "github.com/sirupsen/logrus"
 	"path"
@@ -35,7 +36,7 @@ func main() {
 		return
 	}
 
-	cli, err := common.NewWrappedClient(config.HSURL, config.UserID, config.AccessToken)
+	cli, err := wrappedclient.NewWrappedClient(config.HSURL, config.UserID, config.AccessToken)
 	if err != nil {
 		log.WithError(err).Fatal("failed to instantiate matrix client")
 		return

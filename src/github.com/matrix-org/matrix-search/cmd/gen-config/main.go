@@ -4,6 +4,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
+	"github.com/matrix-org/matrix-search/wrappedclient"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,7 +31,7 @@ func main() {
 	}).Info("starting")
 
 	// Log in here
-	cli, err := common.MakeClient(opts.HSURL, "", "")
+	cli, err := wrappedclient.NewWrappedClient(opts.HSURL, "", "")
 	if err != nil {
 		log.WithError(err).Fatal("failed to make client")
 		return

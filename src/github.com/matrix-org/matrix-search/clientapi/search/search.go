@@ -10,6 +10,7 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/common"
 	"github.com/matrix-org/matrix-search/indexing"
+	"github.com/matrix-org/matrix-search/wrappedclient"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,16 +92,16 @@ func splitRoomEventIDs(str string) (roomID, eventID string) {
 	return segs[0], segs[1]
 }
 
-func glueRoomEventIDs(ev *common.WrappedEvent) string {
+func glueRoomEventIDs(ev *wrappedclient.WrappedEvent) string {
 	return ev.RoomID + "/" + ev.ID
 }
 
 type SearchResultProcessor interface {
 	Build(id string, includeProfile bool) *Result
-	GetEv() *common.WrappedEvent
+	GetEv() *wrappedclient.WrappedEvent
 }
 
-func buildResult(reg *common.RespEvGeneric, includeProfile bool) (r Result) {
+func buildResult(reg *wrappedclient.RespEvGeneric, includeProfile bool) (r Result) {
 	r.Result = reg.Event
 
 	ctx := reg.Context
@@ -149,7 +150,7 @@ func buildResult(reg *common.RespEvGeneric, includeProfile bool) (r Result) {
 
 const MaxSearchRuns = 3
 
-func searchMessages(cli *common.WrappedClient, index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from int, context *RequestEventContext) (
+func searchMessages(cli *wrappedclient.WrappedClient, index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
@@ -186,36 +187,36 @@ func searchMessages(cli *common.WrappedClient, index bleve.Index, keys []string,
 		total = int(resp.Total)
 		numHits := len(resp.Hits)
 
-		tuples := make([]common.EventTuple, 0, numHits)
+		tuples := make([]wrappedclient.EventTuple, 0, numHits)
 		hitMap := map[string]*search.DocumentMatch{}
 		for _, hit := range resp.Hits {
 			hitMap[hit.ID] = hit
 			roomID, eventID := splitRoomEventIDs(hit.ID)
-			tuples = append(tuples, common.EventTuple{roomID, eventID})
+			tuples = append(tuples, wrappedclient.EventTuple{roomID, eventID})
 		}
 
-		ttt := make([]*common.RespEvGeneric, 0, numHits)
+		ttt := make([]*wrappedclient.RespEvGeneric, 0, numHits)
 
 		if context != nil { // wantsContext
-			var ctxs []*common.RespContext
+			var ctxs []*wrappedclient.RespContext
 			ctxs, err = cli.MassResolveEventContext(tuples, beforeLimit, afterLimit)
 			if err != nil {
 				return
 			}
 
 			for _, ctx := range ctxs {
-				context := common.Context{ctx.Start, ctx.End, ctx.EventsBefore, ctx.EventsAfter, ctx.State}
-				ttt = append(ttt, &common.RespEvGeneric{ctx.Event, &context})
+				context := wrappedclient.Context{ctx.Start, ctx.End, ctx.EventsBefore, ctx.EventsAfter, ctx.State}
+				ttt = append(ttt, &wrappedclient.RespEvGeneric{ctx.Event, &context})
 			}
 		} else {
-			var evs []*common.WrappedEvent
+			var evs []*wrappedclient.WrappedEvent
 			evs, err = cli.MassResolveEvent(tuples)
 			if err != nil {
 				return
 			}
 
 			for _, ev := range evs {
-				ttt = append(ttt, &common.RespEvGeneric{ev, nil})
+				ttt = append(ttt, &wrappedclient.RespEvGeneric{ev, nil})
 			}
 		}
 
@@ -258,7 +259,7 @@ func getHTTPError(code int) *HTTPError {
 	}
 }
 
-func handler(cli *common.WrappedClient, index bleve.Index, sr *SearchRequest, b *batch) (resp *Results, err error) {
+func handler(cli *wrappedclient.WrappedClient, index bleve.Index, sr *SearchRequest, b *batch) (resp *Results, err error) {
 	roomCat := sr.SearchCategories.RoomEvents
 
 	// The actual thing to query in FTS
@@ -479,7 +480,7 @@ func getBatch(c *gin.Context) (b *batch, err error) {
 	return
 }
 
-func Register(r *gin.RouterGroup, cli *common.WrappedClient, index bleve.Index) {
+func Register(r *gin.RouterGroup, cli *wrappedclient.WrappedClient, index bleve.Index) {
 	r.POST("/clientapi/search", func(c *gin.Context) {
 		b, err := getBatch(c)
 		if err != nil {
