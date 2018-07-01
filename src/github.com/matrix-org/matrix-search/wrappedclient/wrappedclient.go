@@ -5,12 +5,10 @@ import (
 	"github.com/matrix-org/gomatrix"
 	"net/http"
 	"strconv"
-	"sync"
 )
 
 type WrappedClient struct {
 	*gomatrix.Client
-	sync.Mutex
 }
 
 type RespWhoami struct {
@@ -18,9 +16,6 @@ type RespWhoami struct {
 }
 
 func (cli *WrappedClient) Whoami() (resp *RespWhoami, err error) {
-	cli.Lock()
-	defer cli.Unlock()
-
 	urlPath := cli.BuildURL("account", "whoami")
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 	return
@@ -31,18 +26,12 @@ type RespJoinedRooms struct {
 }
 
 func (cli *WrappedClient) JoinedRooms() (resp *RespJoinedRooms, err error) {
-	cli.Lock()
-	defer cli.Unlock()
-
 	urlPath := cli.BuildURL("joined_rooms")
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 	return
 }
 
 func (cli *WrappedClient) LatestState(roomID string) (resp []*gomatrix.Event, err error) {
-	cli.Lock()
-	defer cli.Unlock()
-
 	urlPath := cli.BuildURL("rooms", roomID, "state")
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 	return
@@ -84,9 +73,6 @@ func max(a, b int) int {
 }
 
 func (cli *WrappedClient) ResolveEventContext(roomID, eventID string, beforeLimit, afterLimit int) (resp *RespContext, err error) {
-	cli.Lock()
-	defer cli.Unlock()
-
 	limit := max(beforeLimit, afterLimit) + 1
 
 	urlPath := cli.BuildURLWithQuery([]string{"rooms", roomID, "context", eventID}, map[string]string{
@@ -109,9 +95,6 @@ func (ev *WrappedEvent) IsStateEvent() bool {
 }
 
 func (cli *WrappedClient) ResolveEvent(roomID, eventID string) (resp *WrappedEvent, err error) {
-	cli.Lock()
-	defer cli.Unlock()
-
 	urlPath := cli.BuildURL("rooms", roomID, "event", eventID)
 	_, err = cli.MakeRequest("GET", urlPath, nil, &resp)
 	return
@@ -170,15 +153,6 @@ func MakeClient(hsURL, localpart, token string) (cli *gomatrix.Client, err error
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
 	return
-}
-
-func NewWrappedASClient(userID, hsURL, ASUserID, token string) (wp *WrappedClient, err error) {
-	cli, err := MakeClient(hsURL, ASUserID, token)
-	if err != nil {
-		return
-	}
-	cli.AppServiceUserID = userID
-	return &WrappedClient{Client: cli}, nil
 }
 
 func NewWrappedClient(hsURL, userID, token string) (wp *WrappedClient, err error) {
