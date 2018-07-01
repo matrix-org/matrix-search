@@ -144,21 +144,13 @@ func (cli *WrappedClient) MassResolveEvent(wants []*EventTuple) (resp []*RespEvG
 	return
 }
 
-func MakeClient(hsURL, localpart, token string) (cli *gomatrix.Client, err error) {
-	cli, err = gomatrix.NewClient(hsURL, localpart, token)
-	if err != nil {
+func NewWrappedClient(hsURL, userID, token string) (wp *WrappedClient, err error) {
+	var cli *gomatrix.Client
+	if cli, err = gomatrix.NewClient(hsURL, userID, token); err != nil {
 		return
 	}
 	cli.Client = &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
-	return
-}
-
-func NewWrappedClient(hsURL, userID, token string) (wp *WrappedClient, err error) {
-	cli, err := MakeClient(hsURL, userID, token)
-	if err != nil {
-		return
-	}
 	return &WrappedClient{Client: cli}, nil
 }
