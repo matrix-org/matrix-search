@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/blevesearch/bleve"
@@ -45,7 +46,7 @@ func qrAddBoolField(qr *query.BooleanQuery, fieldName string, value bool) {
 	qr.AddMust(q)
 }
 
-func search1(index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
+func search1(idx bleve.Index, ctx context.Context, keys []string, filter FilterPart, orderBy, searchTerm string, from, size int) (resp *bleve.SearchResult, err error) {
 	qr := bleve.NewBooleanQuery()
 
 	// Must satisfy room_id
@@ -83,17 +84,8 @@ func search1(index bleve.Index, keys []string, filter FilterPart, orderBy, searc
 			},
 		})
 	}
-	resp, err = index.Search(sr)
+	resp, err = idx.SearchInContext(ctx, sr)
 	return
-}
-
-func splitRoomEventIDs(str string) (roomID, eventID string) {
-	segs := strings.SplitN(str, "/", 2)
-	return segs[0], segs[1]
-}
-
-func glueRoomEventIDs(ev *wrappedclient.WrappedEvent) string {
-	return ev.RoomID + "/" + ev.ID
 }
 
 type SearchResultProcessor interface {
@@ -150,7 +142,7 @@ func buildResult(reg *wrappedclient.RespEvGeneric, includeProfile bool) (r Resul
 
 const MaxSearchRuns = 3
 
-func searchMessages(cli *wrappedclient.WrappedClient, index bleve.Index, keys []string, filter FilterPart, orderBy, searchTerm string, from int, context *RequestEventContext) (
+func searchMessages(cli *wrappedclient.WrappedClient, idx bleve.Index, ctx context.Context, keys []string, filter FilterPart, orderBy, searchTerm string, from int, context *RequestEventContext) (
 	roomEvMap map[string]*Result, total int, res search.DocumentMatchCollection, err error) {
 
 	if roomEvMap == nil {
@@ -179,7 +171,7 @@ func searchMessages(cli *wrappedclient.WrappedClient, index bleve.Index, keys []
 		}
 
 		var resp *bleve.SearchResult
-		resp, err = search1(index, keys, filter, orderBy, searchTerm, from+(i*pageSize), pageSize)
+		resp, err = search1(idx, ctx, keys, filter, orderBy, searchTerm, from+(i*pageSize), pageSize)
 		if err != nil {
 			return
 		}
@@ -187,51 +179,42 @@ func searchMessages(cli *wrappedclient.WrappedClient, index bleve.Index, keys []
 		total = int(resp.Total)
 		numHits := len(resp.Hits)
 
-		tuples := make([]wrappedclient.EventTuple, 0, numHits)
+		tuples := make([]*wrappedclient.EventTuple, 0, numHits)
 		hitMap := map[string]*search.DocumentMatch{}
 		for _, hit := range resp.Hits {
 			hitMap[hit.ID] = hit
-			roomID, eventID := splitRoomEventIDs(hit.ID)
-			tuples = append(tuples, wrappedclient.EventTuple{roomID, eventID})
+			roomID, eventID := indexing.SplitIndexID(hit.ID)
+			tuples = append(tuples, wrappedclient.NewEventTuple(roomID, eventID))
 		}
 
-		ttt := make([]*wrappedclient.RespEvGeneric, 0, numHits)
+		evs := make([]*wrappedclient.RespEvGeneric, 0, numHits)
 
 		if context != nil { // wantsContext
-			var ctxs []*wrappedclient.RespContext
-			ctxs, err = cli.MassResolveEventContext(tuples, beforeLimit, afterLimit)
+			evs, err = cli.MassResolveEventContext(tuples, beforeLimit, afterLimit)
 			if err != nil {
 				return
 			}
-
-			for _, ctx := range ctxs {
-				context := wrappedclient.Context{ctx.Start, ctx.End, ctx.EventsBefore, ctx.EventsAfter, ctx.State}
-				ttt = append(ttt, &wrappedclient.RespEvGeneric{ctx.Event, &context})
-			}
 		} else {
-			var evs []*wrappedclient.WrappedEvent
 			evs, err = cli.MassResolveEvent(tuples)
 			if err != nil {
 				return
 			}
-
-			for _, ev := range evs {
-				ttt = append(ttt, &wrappedclient.RespEvGeneric{ev, nil})
-			}
 		}
 
-		for _, t := range ttt {
+		for _, gev := range evs {
 			// If we have reached our target within our search runs, break out of the loop
 			if numGotten >= filter.Limit {
 				break
 			}
 
-			gluedID := glueRoomEventIDs(t.Event)
+			gluedID := indexing.MakeIndexID(gev.Event.RoomID, gev.Event.ID)
+			// TODO consolidate this so we just return a list of events
+			// instead of list + evMap which is inefficient.
 			hit := hitMap[gluedID]
 
-			result := buildResult(t, context.IncludeProfile)
+			result := buildResult(gev, context.IncludeProfile)
 			result.Rank = hit.Score
-			roomEvMap[hit.ID] = &result
+			roomEvMap[hit.ID] = &result //
 
 			res = append(res, hit)
 			numGotten++
@@ -259,7 +242,7 @@ func getHTTPError(code int) *HTTPError {
 	}
 }
 
-func handler(cli *wrappedclient.WrappedClient, index bleve.Index, sr *SearchRequest, b *batch) (resp *Results, err error) {
+func handler(cli *wrappedclient.WrappedClient, index bleve.Index, ctx context.Context, sr *SearchRequest, b *batch) (resp *Results, err error) {
 	roomCat := sr.SearchCategories.RoomEvents
 
 	// The actual thing to query in FTS
@@ -327,7 +310,7 @@ func handler(cli *wrappedclient.WrappedClient, index bleve.Index, sr *SearchRequ
 	switch roomCat.OrderBy {
 	case "rank":
 	case "":
-		eventMap, count, allowedEvents, err = searchMessages(cli, index, keys, searchFilter, "rank", searchTerm, 0, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, index, ctx, keys, searchFilter, "rank", searchTerm, 0, eventContext)
 		if err != nil {
 			return
 		}
@@ -354,7 +337,7 @@ func handler(cli *wrappedclient.WrappedClient, index bleve.Index, sr *SearchRequ
 			}
 		}
 
-		eventMap, count, allowedEvents, err = searchMessages(cli, index, keys, searchFilter, "recent", searchTerm, from, eventContext)
+		eventMap, count, allowedEvents, err = searchMessages(cli, index, ctx, keys, searchFilter, "recent", searchTerm, from, eventContext)
 
 		// the number of the events the caller still has not seen after this batch
 		numUnseen := count - from - len(allowedEvents)
@@ -494,7 +477,7 @@ func Register(r *gin.RouterGroup, cli *wrappedclient.WrappedClient, index bleve.
 			return
 		}
 
-		resp, err := handler(cli, index, &sr, b)
+		resp, err := handler(cli, index, c, &sr, b)
 
 		if err != nil {
 			if e, ok := err.(gomatrix.HTTPError); ok {

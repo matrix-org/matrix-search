@@ -1,8 +1,10 @@
 package indexing
 
 import (
+	"fmt"
 	"github.com/blevesearch/bleve/search/query"
 	"github.com/matrix-org/matrix-search/common"
+	"strings"
 )
 
 func GenerateQueryList(filterSet common.StringSet, fieldName string) []query.Query {
@@ -16,4 +18,13 @@ func GenerateQueryList(filterSet common.StringSet, fieldName string) []query.Que
 		return queries
 	}
 	return nil
+}
+
+func SplitIndexID(str string) (roomID, eventID string) {
+	parts := strings.SplitN(str, "/", 2)
+	return parts[0], parts[1]
+}
+
+func MakeIndexID(roomID, eventID string) string {
+	return fmt.Sprintf("%s/%s", roomID, eventID)
 }

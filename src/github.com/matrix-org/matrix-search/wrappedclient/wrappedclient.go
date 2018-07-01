@@ -122,28 +122,41 @@ type EventTuple struct {
 	EventID string
 }
 
-func (cli *WrappedClient) MassResolveEventContext(wants []EventTuple, beforeLimit, afterLimit int) (resp []*RespContext, err error) {
-	resp = make([]*RespContext, 0, len(wants))
+func NewEventTuple(roomID, eventID string) *EventTuple {
+	return &EventTuple{roomID, eventID}
+}
+
+func (cli *WrappedClient) MassResolveEventContext(wants []*EventTuple, beforeLimit, afterLimit int) (resp []*RespEvGeneric, err error) {
+	resp = make([]*RespEvGeneric, 0, len(wants))
 	for _, want := range wants {
 		ctx, err := cli.ResolveEventContext(want.RoomID, want.EventID, beforeLimit, afterLimit)
 		if err != nil {
 			// TODO ignore history-perms
 			return nil, err
 		}
-		resp = append(resp, ctx)
+		resp = append(resp, &RespEvGeneric{
+			ctx.Event,
+			&Context{
+				ctx.Start,
+				ctx.End,
+				ctx.EventsBefore,
+				ctx.EventsAfter,
+				ctx.State,
+			},
+		})
 	}
 	return
 }
 
-func (cli *WrappedClient) MassResolveEvent(wants []EventTuple) (resp []*WrappedEvent, err error) {
-	resp = make([]*WrappedEvent, 0, len(wants))
+func (cli *WrappedClient) MassResolveEvent(wants []*EventTuple) (resp []*RespEvGeneric, err error) {
+	resp = make([]*RespEvGeneric, 0, len(wants))
 	for _, want := range wants {
 		ev, err := cli.ResolveEvent(want.RoomID, want.EventID)
 		if err != nil {
 			// TODO ignore history-perms
 			return nil, err
 		}
-		resp = append(resp, ev)
+		resp = append(resp, &RespEvGeneric{ev, nil})
 	}
 	return
 }

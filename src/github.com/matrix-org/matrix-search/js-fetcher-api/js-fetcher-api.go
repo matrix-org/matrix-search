@@ -4,6 +4,7 @@ import (
 	"github.com/blevesearch/bleve"
 	"github.com/gin-gonic/gin"
 	"github.com/matrix-org/gomatrix"
+	"github.com/matrix-org/matrix-search/indexing"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 )
@@ -94,7 +95,7 @@ func Register(r *gin.RouterGroup, index bleve.Index) {
 		}
 
 		for i := 0; i < len(resp.Hits); i++ {
-			roomID, eventID := splitRoomEventIDs(resp.Hits[i].ID)
+			roomID, eventID := indexing.SplitIndexID(resp.Hits[i].ID)
 
 			res.Rows[i].RoomID = roomID
 			res.Rows[i].EventID = eventID

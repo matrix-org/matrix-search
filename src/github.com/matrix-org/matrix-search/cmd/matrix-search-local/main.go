@@ -11,7 +11,7 @@ import (
 	"github.com/matrix-org/matrix-search/wrappedclient"
 	_ "github.com/mattn/go-sqlite3"
 	log "github.com/sirupsen/logrus"
-	"path"
+	"path/filepath"
 	"upper.io/db.v3/sqlite"
 )
 
@@ -56,7 +56,7 @@ func main() {
 		return
 	}
 
-	index, err := indexing.Bleve(path.Join(opts.DataPath, "bleve"))
+	index, err := indexing.Bleve(filepath.Join(opts.DataPath, "bleve"))
 	if err != nil {
 		log.WithError(err).Fatal("failed to connect to bleve index")
 		return
@@ -68,7 +68,7 @@ func main() {
 		pprof.Register(router)
 	}
 
-	dbPath := path.Join(opts.DataPath, "db.sqlite")
+	dbPath := filepath.Join(opts.DataPath, "db.sqlite")
 	log.WithField("db_path", dbPath).Info("opening sqlite database")
 
 	sess, err := sqlite.Open(sqlite.ConnectionURL{
