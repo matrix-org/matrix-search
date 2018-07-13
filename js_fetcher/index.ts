@@ -6,7 +6,7 @@ declare var global: {
     atob: (string) => string;
 };
 
-import argv from 'argv';
+import yargs from 'yargs';
 import get from 'lodash.get';
 import * as winston from 'winston';
 import {RequestPromise, RequestPromiseOptions} from 'request-promise';
@@ -34,6 +34,7 @@ import {
 } from 'matrix-js-sdk';
 // side-effect upgrade MatrixClient prototype
 import './matrix_client_ext';
+import * as fs from "fs";
 
 const Queue = require('better-queue');
 const SqliteStore = require('better-queue-sqlite');
@@ -41,26 +42,30 @@ const request = require('request-promise');
 
 const LocalStorageCryptoStore = require('matrix-js-sdk/lib/crypto/store/localStorage-crypto-store').default;
 
-argv.option([
-    {
-        name: 'config',
-        type: 'path',
+
+const args = yargs
+    .option('config', {
+        alias: 'c',
         description: 'Path to the JSON config file',
-    }, {
-        name: 'data',
-        type: 'path',
-        description: 'Path to the data directory',
-    }, {
-        name: 'matrix-search-url',
         type: 'string',
+        required: true,
+    })
+    .option('data', {
+        alias: 'd',
+        description: 'Path to the data directory',
+        type: 'string',
+        required: true,
+    })
+    .option('matrix-search-url', {
+        alias: 'u',
         description: 'The address:port of the matrix-search Go server',
-    },
-]);
-const args = argv.run();
+        type: 'string',
+        default: '"http://localhost:8000/api/"',
+    }).argv;
 
 // Loading localStorage module
 if (typeof global.localStorage === "undefined" || global.localStorage === null)
-    global.localStorage = new (require('node-localstorage').LocalStorage)(path.join(args.options['data'], 'js_fetcher.localStorage'));
+    global.localStorage = new (require('node-localstorage').LocalStorage)(path.join(args['data'], 'js_fetcher.localStorage'));
 
 setCryptoStoreFactory(() => new LocalStorageCryptoStore(global.localStorage));
 
@@ -125,13 +130,14 @@ function onBatchFailed(error) {
 async function setup() {
     let config;
     try {
-        config = require(args.options['config'] || 'config.json');
+        const file = fs.readFileSync(args['config'], 'utf8');
+        config = JSON.parse(file);
     } catch (e) {
         logger.error('failed to load config', e);
         return;
     }
 
-    const b = new BleveHttp(args.options['matrix-search-url'] || "http://localhost:8000/api/");
+    const b = new BleveHttp(args['matrix-search-url']);
 
     const q = new Queue(async (batch: Array<Event>, cb) => {
         try {
@@ -144,7 +150,7 @@ async function setup() {
         maxRetries: 100,
         retryDelay: 5000,
         store: new SqliteStore({
-            path: path.join(args.options['data'], 'js_fetcher.queue.sqlite'),
+            path: path.join(args['data'], 'js_fetcher.queue.sqlite'),
         }),
     });
 

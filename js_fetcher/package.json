@@ -1,8 +1,9 @@
 {
-  "name": "matrix-search",
+  "name": "matrix-search-js-fetcher",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "bin": "index.js",
   "scripts": {
     "start": "cross-env-shell node $NODE_DEBUG_OPTION --trace-warnings index.js"
   },
@@ -13,7 +14,6 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "argv": "0.0.2",
     "better-queue": "^3.8.6",
     "better-queue-sqlite": "^1.0.4",
     "body-parser": "^1.18.2",
@@ -25,10 +25,11 @@
     "olm": "https://matrix.org/packages/npm/olm/olm-2.2.2.tgz",
     "request": "^2.87.0",
     "request-promise": "^4.2.2",
-    "winston": "^2.4.2"
+    "winston": "^2.4.2",
+    "yargs": "^12.0.1"
   },
   "devDependencies": {
-    "@types/argv": "0.0.4",
+    "@types/yargs": "^11.0.0",
     "@types/body-parser": "^1.17.0",
     "@types/cors": "^2.8.4",
     "@types/express": "^4.11.1",
