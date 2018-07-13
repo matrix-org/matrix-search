@@ -96,19 +96,40 @@ func TestStringSet_Remove(t *testing.T) {
 }
 
 func TestStringSet_Intersect(t *testing.T) {
-	type args struct {
-		other StringSet
-	}
 	tests := []struct {
-		name string
-		ss   StringSet
-		args args
+		name  string
+		ss    StringSet // in A
+		other StringSet // in B
+		want  StringSet // out
 	}{
-	// TODO: Add test cases.
+		{
+			"intersect empty",
+			NewStringSet([]string{}),
+			NewStringSet([]string{}),
+			NewStringSet([]string{}),
+		}, {
+			"intersect len=1 dup",
+			NewStringSet([]string{"a"}),
+			NewStringSet([]string{"a"}),
+			NewStringSet([]string{"a"}),
+		}, {
+			"intersect len=1 disjoint",
+			NewStringSet([]string{"a"}),
+			NewStringSet([]string{"b"}),
+			NewStringSet([]string{}),
+		}, {
+			"intersect complex",
+			NewStringSet([]string{"a", "b", "c", "d"}),
+			NewStringSet([]string{"b", "c", "d", "e"}),
+			NewStringSet([]string{"b", "c", "d"}),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.ss.Intersect(tt.args.other)
+			tt.ss.Intersect(tt.other)
+			if !reflect.DeepEqual(tt.want, tt.ss) {
+				t.Errorf("StringSet.Intersect(); ss = %v, want %v", tt.ss, tt.want)
+			}
 		})
 	}
 }
@@ -119,7 +140,15 @@ func TestStringSet_IsEmpty(t *testing.T) {
 		ss   StringSet
 		want bool
 	}{
-	// TODO: Add test cases.
+		{
+			"empty",
+			NewStringSet([]string{}),
+			true,
+		}, {
+			"not empty",
+			NewStringSet([]string{"1"}),
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

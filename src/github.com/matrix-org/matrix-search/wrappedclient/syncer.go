@@ -3,6 +3,7 @@ package wrappedclient
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/blevesearch/bleve"
 	"github.com/matrix-org/gomatrix"
 	"github.com/matrix-org/matrix-search/indexing"
 	"runtime/debug"
@@ -153,14 +154,16 @@ func (s *Syncer) GetFilterJSON(userID string) json.RawMessage {
 	return json.RawMessage(`{"room":{"timeline":{"limit":50}}}`)
 }
 
-func RegisterSyncer(idxr indexing.Indexer, cli *WrappedClient) {
+func RegisterSyncer(idx bleve.Index, cli *WrappedClient) {
 	store := NewPersistedStore()
 	syncer := gomatrix.NewDefaultSyncer(cli.UserID, store)
 
 	cli.Syncer = syncer
 	cli.Store = store
 
-	syncer.OnEventType("m.room.message", idxr.IndexEvent)
+	syncer.OnEventType("m.room.message", func(event *gomatrix.Event) {
+		indexing.IndexEvent(idx, event)
+	})
 
 	for {
 		err := cli.Sync()
